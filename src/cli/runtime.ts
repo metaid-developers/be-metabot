@@ -6,14 +6,21 @@ import {
   createRuntimeStateStore,
   type RuntimeDaemonRecord,
 } from '../core/state/runtimeStateStore';
+import { createFileSecretStore } from '../core/secrets/fileSecretStore';
+import { createLocalMnemonicSigner } from '../core/signing/localMnemonicSigner';
+import { normalizeChainWriteRequest } from '../core/chain/writePin';
+import type { Signer } from '../core/signing/signer';
 import { createMetabotDaemon } from '../daemon';
 import { createDefaultMetabotDaemonHandlers } from '../daemon/defaultHandlers';
+import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import type { CliDependencies, CliRuntimeContext } from './types';
 
 const DEFAULT_DAEMON_BASE_URL = 'http://127.0.0.1:4827';
 const DEFAULT_DAEMON_HOST = '127.0.0.1';
 const DEFAULT_DAEMON_START_TIMEOUT_MS = 5_000;
 const DAEMON_START_POLL_INTERVAL_MS = 100;
+const TEST_FAKE_CHAIN_WRITE_ENV = 'METABOT_TEST_FAKE_CHAIN_WRITE';
+const TEST_FAKE_SUBSIDY_ENV = 'METABOT_TEST_FAKE_SUBSIDY';
 
 function normalizeBaseUrl(value: string | undefined): string {
   const trimmed = typeof value === 'string' ? value.trim() : '';
@@ -118,6 +125,49 @@ async function requestJson<T>(
   return response.json() as Promise<MetabotCommandResult<T>>;
 }
 
+function createTestChainWriteSigner(baseSigner: Signer): Signer {
+  let writeCount = 0;
+
+  return {
+    getIdentity: () => baseSigner.getIdentity(),
+    getPrivateChatIdentity: () => baseSigner.getPrivateChatIdentity(),
+    writePin: async (rawInput) => {
+      const request = normalizeChainWriteRequest(rawInput);
+      const identity = await baseSigner.getIdentity();
+      writeCount += 1;
+      return {
+        txids: [`${request.path || 'metaid'}-tx-${writeCount}`],
+        pinId: `${request.path || 'metaid'}-pin-${writeCount}`,
+        totalCost: 1,
+        network: request.network,
+        operation: request.operation,
+        path: request.path,
+        contentType: request.contentType,
+        encoding: request.encoding,
+        globalMetaId: identity.globalMetaId,
+        mvcAddress: identity.mvcAddress,
+      };
+    },
+  };
+}
+
+function createTestSubsidyRequester(): (
+  options: RequestMvcGasSubsidyOptions
+) => Promise<RequestMvcGasSubsidyResult> {
+  return async (options) => ({
+    success: true,
+    step1: {
+      address: options.mvcAddress,
+      source: 'test-fake-subsidy',
+    },
+    step2: {
+      address: options.mvcAddress,
+      source: 'test-fake-subsidy',
+      rewarded: true,
+    },
+  });
+}
+
 export function createDefaultCliDependencies(context: CliRuntimeContext): CliDependencies {
   return {
     buzz: {
@@ -201,12 +251,24 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   const homeDir = normalizeHomeDir(context.env, context.cwd);
   const paths = resolveMetabotPaths(homeDir);
   let daemonRecord: RuntimeDaemonRecord | null = null;
+  const secretStore = createFileSecretStore(homeDir);
+  const baseSigner = createLocalMnemonicSigner({ secretStore });
+  const signer = context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
+    ? createTestChainWriteSigner(baseSigner)
+    : baseSigner;
+  const requestMvcGasSubsidy = context.env[TEST_FAKE_SUBSIDY_ENV] === '1'
+    ? createTestSubsidyRequester()
+    : undefined;
 
   const daemon = createMetabotDaemon({
     homeDirOrPaths: paths,
     handlers: createDefaultMetabotDaemonHandlers({
       homeDir,
       getDaemonRecord: () => daemonRecord,
+      secretStore,
+      signer,
+      identitySyncStepDelayMs: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 0 : undefined,
+      requestMvcGasSubsidy,
     }),
   });
 

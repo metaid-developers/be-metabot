@@ -1,12 +1,5 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { generateMnemonic } from '@scure/bip39';
-import { wordlist } from '@scure/bip39/wordlists/english';
-import {
-  DEFAULT_DERIVATION_PATH,
-  deriveIdentity,
-  derivePrivateKeyHex,
-} from '../core/identity/deriveIdentity';
 import {
   commandFailed,
   commandManualActionRequired,
@@ -30,6 +23,14 @@ import type { SecretStore } from '../core/secrets/secretStore';
 import type { Signer } from '../core/signing/signer';
 import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import { postBuzzToChain } from '../core/buzz/postBuzz';
+import { runBootstrapFlow } from '../core/bootstrap/bootstrapFlow';
+import {
+  createLocalIdentitySyncStep,
+  createLocalMetabotStep,
+  createMetabotSubsidyStep,
+  isIdentityBootstrapReady,
+} from '../core/bootstrap/localIdentityBootstrap';
+import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 
 const DIRECTORY_SEEDS_FILE = 'directory-seeds.json';
 
@@ -39,27 +40,6 @@ function normalizeText(value: unknown): string {
 
 function sanitizeServiceSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'service';
-}
-
-function buildIdentityRecord(input: {
-  name: string;
-  metabotId: number;
-  createdAt: number;
-  identity: Awaited<ReturnType<typeof deriveIdentity>>;
-}): RuntimeIdentityRecord {
-  return {
-    metabotId: input.metabotId,
-    name: input.name,
-    createdAt: input.createdAt,
-    path: input.identity.path,
-    publicKey: input.identity.publicKey,
-    chatPublicKey: input.identity.chatPublicKey,
-    mvcAddress: input.identity.mvcAddress,
-    btcAddress: input.identity.btcAddress,
-    dogeAddress: input.identity.dogeAddress,
-    metaId: input.identity.metaId,
-    globalMetaId: input.identity.globalMetaId,
-  };
 }
 
 function resolvePaymentAddress(identity: RuntimeIdentityRecord, currency: string): string {
@@ -428,6 +408,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
   getDaemonRecord: () => RuntimeDaemonRecord | null;
   secretStore?: SecretStore;
   signer?: Signer;
+  identitySyncStepDelayMs?: number;
+  requestMvcGasSubsidy?: (
+    options: RequestMvcGasSubsidyOptions
+  ) => Promise<RequestMvcGasSubsidyResult>;
 }): MetabotDaemonHttpHandlers {
   const secretStore = input.secretStore ?? createFileSecretStore(input.homeDir);
   const signer = input.signer ?? createLocalMnemonicSigner({ secretStore });
@@ -518,44 +502,39 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
 
         const state = await runtimeStateStore.readState();
-        if (state.identity) {
+        if (isIdentityBootstrapReady(state.identity)) {
           return commandSuccess(state.identity);
         }
 
-        const mnemonic = generateMnemonic(wordlist);
-        const identity = await deriveIdentity({
-          mnemonic,
-          path: DEFAULT_DERIVATION_PATH,
-        });
-        const createdAt = Date.now();
-        const identityRecord = buildIdentityRecord({
-          name: normalizedName,
-          metabotId: 1,
-          createdAt,
-          identity,
-        });
-
-        await secretStore.writeIdentitySecrets({
-          mnemonic,
-          path: identity.path,
-          privateKeyHex: await derivePrivateKeyHex({
-            mnemonic,
-            path: identity.path,
+        const requestName = state.identity?.name || normalizedName;
+        const bootstrap = await runBootstrapFlow({
+          request: {
+            name: requestName,
+          },
+          createMetabot: createLocalMetabotStep({
+            runtimeStateStore,
+            secretStore,
           }),
-          publicKey: identity.publicKey,
-          chatPublicKey: identity.chatPublicKey,
-          mvcAddress: identity.mvcAddress,
-          btcAddress: identity.btcAddress,
-          dogeAddress: identity.dogeAddress,
-          metaId: identity.metaId,
-          globalMetaId: identity.globalMetaId,
-        });
-        await runtimeStateStore.writeState({
-          ...state,
-          identity: identityRecord,
+          requestSubsidy: createMetabotSubsidyStep({
+            runtimeStateStore,
+            requestMvcGasSubsidy: input.requestMvcGasSubsidy,
+          }),
+          syncIdentityToChain: createLocalIdentitySyncStep({
+            runtimeStateStore,
+            signer,
+            stepDelayMs: input.identitySyncStepDelayMs,
+          }),
         });
 
-        return commandSuccess(identityRecord);
+        const nextState = await runtimeStateStore.readState();
+        if (nextState.identity && (bootstrap.success || bootstrap.canSkip)) {
+          return commandSuccess(nextState.identity);
+        }
+
+        return commandFailed(
+          'identity_bootstrap_failed',
+          bootstrap.error ?? 'MetaBot bootstrap failed before the identity was ready.'
+        );
       },
     },
     network: {

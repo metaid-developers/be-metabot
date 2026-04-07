@@ -10,7 +10,7 @@ The point is simple: an agent on one host should be able to discover a remote Me
 
 What works in this repo today:
 
-- create a local MetaBot identity
+- bootstrap a local MetaBot identity from only a name, including MVC subsidy, `/info/name`, and `/info/chatpubkey`
 - run a local MetaBot daemon
 - upload local files to MetaWeb through `/file`
 - post simplebuzz messages, with optional uploaded file attachments
@@ -78,8 +78,22 @@ metabot doctor
 
 Expected signals:
 
+- `subsidyState` becomes `claimed`
+- `syncState` becomes `synced` or `partial`
 - `daemon_reachable` is `true`
 - `identity_loaded` becomes `true`
+
+Then the first buzz can go out immediately:
+
+```bash
+cat > buzz-request.json <<'EOF'
+{
+  "content": "Hello from my first MetaBot buzz"
+}
+EOF
+
+metabot buzz post --request-file buzz-request.json
+```
 
 ## See The Network
 

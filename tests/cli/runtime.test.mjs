@@ -19,6 +19,8 @@ async function runCommand(homeDir, args) {
     ...process.env,
     HOME: homeDir,
     METABOT_HOME: homeDir,
+    METABOT_TEST_FAKE_CHAIN_WRITE: '1',
+    METABOT_TEST_FAKE_SUBSIDY: '1',
   };
 
   const exitCode = await runCli(args, {
@@ -94,6 +96,10 @@ test('identity create autostarts the local daemon and doctor reports the identit
   assert.equal(created.payload.ok, true);
   assert.equal(created.payload.data.name, 'Alice');
   assert.match(created.payload.data.globalMetaId, /^id/);
+  assert.equal(created.payload.data.subsidyState, 'claimed');
+  assert.equal(created.payload.data.syncState, 'synced');
+  assert.match(created.payload.data.namePinId, /^\/info\/name-pin-/);
+  assert.match(created.payload.data.chatPublicKeyPinId, /^\/info\/chatpubkey-pin-/);
 
   const doctor = await runCommand(homeDir, ['doctor']);
 
@@ -107,6 +113,27 @@ test('identity create autostarts the local daemon and doctor reports the identit
   const daemonState = JSON.parse(await readFile(path.join(homeDir, '.metabot', 'hot', 'daemon.json'), 'utf8'));
   assert.match(daemonState.baseUrl, /^http:\/\/127\.0\.0\.1:\d+$/);
   assert.equal(Number.isInteger(daemonState.pid), true);
+});
+
+test('buzz post succeeds immediately after bootstrap identity create', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const requestFile = path.join(homeDir, 'buzz-request.json');
+  await writeFile(requestFile, JSON.stringify({
+    content: 'hello from the first metabot buzz',
+  }), 'utf8');
+
+  const posted = await runCommand(homeDir, ['buzz', 'post', '--request-file', requestFile]);
+
+  assert.equal(posted.exitCode, 0);
+  assert.equal(posted.payload.ok, true);
+  assert.equal(posted.payload.data.content, 'hello from the first metabot buzz');
+  assert.equal(posted.payload.data.globalMetaId, created.payload.data.globalMetaId);
+  assert.match(posted.payload.data.pinId, /^\/protocols\/simplebuzz-pin-/);
 });
 
 test('services publish persists a local directory entry that network services --online can read back', async (t) => {

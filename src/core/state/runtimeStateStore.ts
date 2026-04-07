@@ -3,6 +3,9 @@ import type { PublishedServiceRecord } from '../services/publishService';
 import type { SessionTraceRecord } from '../chat/sessionTrace';
 import { resolveMetabotPaths, type MetabotPaths } from './paths';
 
+export type RuntimeIdentitySubsidyState = 'pending' | 'claimed' | 'failed';
+export type RuntimeIdentitySyncState = 'pending' | 'synced' | 'partial' | 'failed';
+
 export interface RuntimeIdentityRecord {
   metabotId: number;
   name: string;
@@ -15,6 +18,12 @@ export interface RuntimeIdentityRecord {
   dogeAddress: string;
   metaId: string;
   globalMetaId: string;
+  subsidyState?: RuntimeIdentitySubsidyState;
+  subsidyError?: string | null;
+  syncState?: RuntimeIdentitySyncState;
+  syncError?: string | null;
+  namePinId?: string | null;
+  chatPublicKeyPinId?: string | null;
 }
 
 export interface RuntimeDaemonRecord {

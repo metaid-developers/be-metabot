@@ -72,6 +72,16 @@ export async function runBootstrapFlow<TRequest extends BootstrapCreateRequest, 
       subsidyInput: created.subsidyInput
     };
     const subsidy = await runRequestSubsidyStep(options.requestSubsidy, subsidyContext);
+    if (!subsidy.success) {
+      const failed = emitProgress(options.onProgress, 'failed', false, false);
+      return {
+        success: false,
+        metabot: created.metabot,
+        subsidy,
+        error: subsidy.error,
+        ...failed
+      };
+    }
     emitProgress(options.onProgress, 'subsidy_requested', false, false);
 
     const syncContext: BootstrapSyncContext<TRequest, TMetabot> = {
