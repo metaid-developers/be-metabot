@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { evaluateSpendCap, normalizeSpendCurrency, type SpendCap } from './spendPolicy';
 import { evaluateDelegationPolicy } from '../a2a/delegationPolicy';
 import type { DelegationPolicyDecision } from '../a2a/sessionTypes';
@@ -99,7 +100,9 @@ function buildRemoteCallTraceId(input: {
   if (explicit) return explicit;
   const provider = truncateTraceSegment(normalizeText(input.request.providerGlobalMetaId) || 'provider');
   const service = truncateTraceSegment(normalizeText(input.request.servicePinId) || 'service');
-  return `trace-${provider}-${service}`;
+  const timestamp = Date.now().toString(36);
+  const nonce = randomUUID().replace(/-/g, '').slice(0, 8);
+  return `trace-${provider}-${service}-${timestamp}-${nonce}`;
 }
 
 function findTrailingDelegationPrefixFragmentStart(content: string): number {

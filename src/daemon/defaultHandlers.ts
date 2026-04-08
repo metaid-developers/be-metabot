@@ -46,12 +46,14 @@ import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '..
 import { buildDelegationOrderPayload } from '../core/orders/delegationOrderMessage';
 import {
   createSocketIoMetaWebReplyWaiter,
+  type AwaitMetaWebServiceReplyInput,
   type AwaitMetaWebServiceReplyResult,
   type MetaWebServiceReplyWaiter,
 } from '../core/a2a/metawebReplyWaiter';
 
 const DIRECTORY_SEEDS_FILE = 'directory-seeds.json';
 const DEFAULT_CALLER_FOREGROUND_WAIT_MS = 15_000;
+const DEFAULT_CALLER_BACKGROUND_WAIT_MS = 30 * 60 * 1000;
 const DEFAULT_TRACE_WATCH_WAIT_MS = 20_000;
 
 function normalizeText(value: unknown): string {
@@ -673,6 +675,53 @@ async function rebuildCallerTraceArtifacts(input: {
   };
 }
 
+async function loadCallerContinuationState(input: {
+  traceId: string;
+  sessionId: string;
+  runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+  sessionStateStore: ReturnType<typeof createSessionStateStore>;
+  fallbackTrace: SessionTraceRecord;
+}): Promise<{
+  session: A2ASessionRecord;
+  taskRun: A2ATaskRunRecord;
+  trace: SessionTraceRecord;
+} | null> {
+  const sessionState = await input.sessionStateStore.readState();
+  const matchingSessions = sessionState.sessions
+    .filter((entry) => entry.traceId === input.traceId && entry.role === 'caller')
+    .sort((left, right) => left.updatedAt - right.updatedAt);
+  const session = matchingSessions.find((entry) => entry.sessionId === input.sessionId)
+    ?? matchingSessions.at(-1)
+    ?? null;
+  if (!session) {
+    return null;
+  }
+
+  const taskRun = (
+    session.currentTaskRunId
+      ? sessionState.taskRuns.find((entry) => (
+        entry.sessionId === session.sessionId && entry.runId === session.currentTaskRunId
+      ))
+      : null
+  ) ?? sessionState.taskRuns
+    .filter((entry) => entry.sessionId === session.sessionId)
+    .sort((left, right) => left.updatedAt - right.updatedAt)
+    .at(-1)
+    ?? null;
+  if (!taskRun) {
+    return null;
+  }
+
+  const runtimeState = await input.runtimeStateStore.readState();
+  const trace = runtimeState.traces.find((entry) => entry.traceId === input.traceId) ?? input.fallbackTrace;
+
+  return {
+    session,
+    taskRun,
+    trace,
+  };
+}
+
 async function applyCallerReplyResult(input: {
   reply: AwaitMetaWebServiceReplyResult;
   session: A2ASessionRecord;
@@ -815,6 +864,57 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const sessionEngine = createA2ASessionEngine();
   const resolvePeerChatPublicKey = input.fetchPeerChatPublicKey ?? fetchPeerChatPublicKey;
   const callerReplyWaiter = input.callerReplyWaiter ?? createSocketIoMetaWebReplyWaiter();
+  // Keep daemon-side follow-up consumers alive after foreground timeout so late deliveries still land in trace state.
+  const pendingCallerReplyContinuations = new Map<string, Promise<void>>();
+
+  function scheduleCallerReplyContinuation(input: {
+    trace: SessionTraceRecord;
+    sessionId: string;
+    waiterInput: AwaitMetaWebServiceReplyInput;
+  }): void {
+    if (pendingCallerReplyContinuations.has(input.trace.traceId)) {
+      return;
+    }
+
+    const continuation = (async () => {
+      try {
+        const reply = await callerReplyWaiter.awaitServiceReply({
+          ...input.waiterInput,
+          timeoutMs: DEFAULT_CALLER_BACKGROUND_WAIT_MS,
+        });
+        if (reply.state !== 'completed') {
+          return;
+        }
+
+        const current = await loadCallerContinuationState({
+          traceId: input.trace.traceId,
+          sessionId: input.sessionId,
+          runtimeStateStore,
+          sessionStateStore,
+          fallbackTrace: input.trace,
+        });
+        if (!current || current.session.state === 'completed' || current.taskRun.state === 'completed') {
+          return;
+        }
+
+        await applyCallerReplyResult({
+          reply,
+          session: current.session,
+          taskRun: current.taskRun,
+          sessionEngine,
+          sessionStateStore,
+          runtimeStateStore,
+          trace: current.trace,
+        });
+      } catch {
+        // Best effort follow-up: keep the persisted timeout state if late delivery capture fails.
+      } finally {
+        pendingCallerReplyContinuations.delete(input.trace.traceId);
+      }
+    })();
+
+    pendingCallerReplyContinuations.set(input.trace.traceId, continuation);
+  }
 
   return {
     chain: {
@@ -1399,6 +1499,19 @@ export function createDefaultMetabotDaemonHandlers(input: {
             responseTaskRun = timedOut.mutation.taskRun;
             responseEvent = timedOut.mutation.event;
             responsePublicStatus = 'timeout';
+            scheduleCallerReplyContinuation({
+              trace: timedOut.trace,
+              sessionId: timedOut.mutation.session.sessionId,
+              waiterInput: {
+                callerGlobalMetaId: privateChatIdentity.globalMetaId,
+                callerPrivateKeyHex: privateChatIdentity.privateKeyHex,
+                providerGlobalMetaId: plan.service.providerGlobalMetaId,
+                providerChatPublicKey: peerChatPublicKey,
+                servicePinId: plan.service.servicePinId,
+                paymentTxid,
+                timeoutMs: DEFAULT_CALLER_BACKGROUND_WAIT_MS,
+              },
+            });
           }
         }
 

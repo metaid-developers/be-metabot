@@ -114,7 +114,7 @@ test('trace watch terminates when manual action is required', () => {
   assert.deepEqual(events.map((event) => event.status), ['remote_received', 'manual_action_required']);
 });
 
-test('trace watch terminates when timeout is handed off as a public timeout state', () => {
+test('trace watch keeps later completion visible after a timeout handoff', () => {
   const events = buildTraceWatchEvents({
     traceId: 'trace-1',
     sessions: [createSession()],
@@ -125,5 +125,5 @@ test('trace watch terminates when timeout is handed off as a public timeout stat
     ],
   });
 
-  assert.deepEqual(events.map((event) => event.status), ['remote_received', 'timeout']);
+  assert.deepEqual(events.map((event) => event.status), ['remote_received', 'timeout', 'completed']);
 });

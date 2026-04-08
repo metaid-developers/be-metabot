@@ -660,6 +660,85 @@ test('services call persists timeout state when a chain-discovered service does 
   assert.match(transcriptMarkdown, /Foreground timeout reached|Foreground wait ended before the remote MetaBot returned/i);
 });
 
+test('services call upgrades a timed-out chain-discovered caller trace when the remote reply arrives later', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const chainApi = await startFakeChainApiServer();
+  t.after(async () => stopDaemon(homeDir));
+  t.after(async () => chainApi.close());
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const requestFile = path.join(homeDir, 'chain-late-reply-request.json');
+  await writeFile(requestFile, JSON.stringify({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  }), 'utf8');
+
+  const replyConfig = JSON.stringify({
+    state: 'timeout',
+    sequence: [
+      {
+        state: 'timeout',
+      },
+      {
+        state: 'completed',
+        delayMs: 50,
+        responseText: 'A late weather reply finally arrived.',
+        deliveryPinId: 'delivery-pin-late-1',
+      },
+    ],
+  });
+
+  const called = await runCommand(
+    homeDir,
+    ['services', 'call', '--request-file', requestFile],
+    {
+      METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+      METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+      METABOT_TEST_FAKE_METAWEB_REPLY: replyConfig,
+    }
+  );
+
+  assert.equal(called.exitCode, 0);
+  assert.equal(called.payload.ok, true);
+  assert.equal(called.payload.data.session.publicStatus, 'timeout');
+  assert.equal(called.payload.data.session.event, 'timeout');
+
+  let trace = null;
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', called.payload.data.traceId], {
+      METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+      METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+      METABOT_TEST_FAKE_METAWEB_REPLY: replyConfig,
+    });
+    if (trace.payload?.data?.a2a?.publicStatus === 'completed') {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
+  assert.ok(trace, 'expected trace polling to produce a response');
+  assert.equal(trace.exitCode, 0);
+  assert.equal(trace.payload.ok, true);
+  assert.equal(trace.payload.data.a2a.publicStatus, 'completed');
+  assert.equal(trace.payload.data.a2a.latestEvent, 'provider_completed');
+  assert.equal(trace.payload.data.a2a.taskRunState, 'completed');
+
+  const transcriptMarkdown = await readFile(called.payload.data.transcriptMarkdownPath, 'utf8');
+  assert.match(transcriptMarkdown, /Foreground timeout reached|Foreground wait ended before the remote MetaBot returned/i);
+  assert.match(transcriptMarkdown, /A late weather reply finally arrived\./i);
+});
+
 test('chat private encrypts a loopback message and stores a chat trace in the local runtime', async (t) => {
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
   t.after(async () => stopDaemon(homeDir));

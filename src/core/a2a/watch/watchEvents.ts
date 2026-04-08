@@ -12,7 +12,6 @@ export interface TraceWatchEvent {
 const TERMINAL_TRACE_WATCH_STATUSES = new Set<PublicStatus>([
   'completed',
   'manual_action_required',
-  'timeout',
   'remote_failed',
   'network_unavailable',
   'local_runtime_error',

@@ -278,6 +278,13 @@ function createTestMetaWebReplyWaiter(env: NodeJS.ProcessEnv): MetaWebServiceRep
     deliveryPinId?: unknown;
     observedAt?: unknown;
     delayMs?: unknown;
+    sequence?: Array<{
+      state?: unknown;
+      responseText?: unknown;
+      deliveryPinId?: unknown;
+      observedAt?: unknown;
+      delayMs?: unknown;
+    }> | unknown;
   };
   try {
     parsed = JSON.parse(raw) as typeof parsed;
@@ -287,16 +294,24 @@ function createTestMetaWebReplyWaiter(env: NodeJS.ProcessEnv): MetaWebServiceRep
     );
   }
 
+  const sequence = Array.isArray(parsed.sequence) && parsed.sequence.length > 0
+    ? parsed.sequence
+    : [parsed];
+  let replyIndex = 0;
+
   return {
     awaitServiceReply: async (input) => {
-      const delayMs = Number.isFinite(parsed.delayMs)
-        ? Math.max(0, Math.floor(Number(parsed.delayMs)))
+      const step = sequence[Math.min(replyIndex, sequence.length - 1)] ?? parsed;
+      replyIndex += 1;
+
+      const delayMs = Number.isFinite(step.delayMs)
+        ? Math.max(0, Math.floor(Number(step.delayMs)))
         : 0;
       if (delayMs > 0) {
         await sleep(Math.min(delayMs, input.timeoutMs));
       }
 
-      if (parsed.state === 'timeout') {
+      if (step.state === 'timeout') {
         return {
           state: 'timeout',
         };
@@ -304,12 +319,12 @@ function createTestMetaWebReplyWaiter(env: NodeJS.ProcessEnv): MetaWebServiceRep
 
       return {
         state: 'completed',
-        responseText: typeof parsed.responseText === 'string'
-          ? parsed.responseText
+        responseText: typeof step.responseText === 'string'
+          ? step.responseText
           : 'Test fake remote reply.',
-        deliveryPinId: typeof parsed.deliveryPinId === 'string' ? parsed.deliveryPinId : null,
-        observedAt: Number.isFinite(parsed.observedAt)
-          ? Number(parsed.observedAt)
+        deliveryPinId: typeof step.deliveryPinId === 'string' ? step.deliveryPinId : null,
+        observedAt: Number.isFinite(step.observedAt)
+          ? Number(step.observedAt)
           : Date.now(),
         rawMessage: {
           source: 'test-fake-metaweb-reply',

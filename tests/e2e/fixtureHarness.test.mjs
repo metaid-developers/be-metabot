@@ -40,6 +40,9 @@ test('fixture harness generates a trace record after the remote call plan succee
   });
 
   assert.equal(result.call.state, 'ready');
-  assert.equal(result.trace.traceId, 'trace-idq1970463ym8fqm-service-weather-');
-  assert.equal(result.trace.artifacts.traceJsonPath.endsWith('/traces/trace-idq1970463ym8fqm-service-weather-.json'), true);
+  assert.match(result.trace.traceId, /^trace-idq1970463ym8fqm-service-weather--?[a-z0-9]+-[a-z0-9]+$/);
+  assert.equal(
+    result.trace.artifacts.traceJsonPath.includes(`/traces/${result.trace.traceId}.json`),
+    true
+  );
 });
