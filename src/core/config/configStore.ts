@@ -1,21 +1,18 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 
 import { resolveMetabotPaths, type MetabotPaths } from '../state/paths';
 import { createDefaultConfig, type MetabotConfig } from './configTypes';
 
 async function ensureLayout(paths: MetabotPaths): Promise<void> {
-  await fs.mkdir(paths.hotRoot, { recursive: true });
-  await fs.mkdir(paths.evolutionRoot, { recursive: true });
-  await fs.mkdir(paths.evolutionExecutionsRoot, { recursive: true });
-  await fs.mkdir(paths.evolutionAnalysesRoot, { recursive: true });
-  await fs.mkdir(paths.evolutionArtifactsRoot, { recursive: true });
+  await fs.mkdir(path.dirname(paths.configPath), { recursive: true });
 }
 
-async function readJsonFile<T>(filePath: string): Promise<T | null> {
+async function readJsonFile(filePath: string): Promise<unknown | null> {
   try {
     const raw = await fs.readFile(filePath, 'utf8');
-    return JSON.parse(raw) as T;
+    return JSON.parse(raw);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') {
@@ -25,19 +22,33 @@ async function readJsonFile<T>(filePath: string): Promise<T | null> {
   }
 }
 
-function normalizeConfig(input: MetabotConfig | null): MetabotConfig {
+function normalizeBoolean(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function normalizeConfig(input: unknown): MetabotConfig {
   const defaults = createDefaultConfig();
-  if (!input) {
+  if (!input || typeof input !== 'object') {
     return defaults;
   }
 
-  const source = input.evolution_network ?? {};
+  const maybeNetwork = (input as Record<string, unknown>)['evolution_network'];
+  if (!maybeNetwork || typeof maybeNetwork !== 'object') {
+    return defaults;
+  }
+
+  const source = maybeNetwork as Record<string, unknown>;
   return {
     evolution_network: {
-      enabled: source.enabled ?? defaults.evolution_network.enabled,
-      autoAdoptSameSkillSameScope:
-        source.autoAdoptSameSkillSameScope ?? defaults.evolution_network.autoAdoptSameSkillSameScope,
-      autoRecordExecutions: source.autoRecordExecutions ?? defaults.evolution_network.autoRecordExecutions
+      enabled: normalizeBoolean(source.enabled, defaults.evolution_network.enabled),
+      autoAdoptSameSkillSameScope: normalizeBoolean(
+        source.autoAdoptSameSkillSameScope,
+        defaults.evolution_network.autoAdoptSameSkillSameScope
+      ),
+      autoRecordExecutions: normalizeBoolean(
+        source.autoRecordExecutions,
+        defaults.evolution_network.autoRecordExecutions
+      )
     }
   };
 }
@@ -83,7 +94,7 @@ export function createConfigStore(homeDirOrPaths?: string | MetabotPaths): Confi
     },
     async read() {
       await ensureLayout(paths);
-      const data = await readJsonFile<MetabotConfig>(paths.configPath);
+      const data = await readJsonFile(paths.configPath);
       return normalizeConfig(data);
     },
     async set(value: MetabotConfig) {

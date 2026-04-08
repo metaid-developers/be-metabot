@@ -15,7 +15,11 @@ async function withTempHome(action) {
   try {
     await action(tempDir);
   } finally {
-    process.env.METABOT_HOME = previousHome;
+    if (previousHome === undefined) {
+      delete process.env.METABOT_HOME;
+    } else {
+      process.env.METABOT_HOME = previousHome;
+    }
     await fs.rm(tempDir, { recursive: true, force: true });
   }
 }
@@ -37,5 +41,60 @@ test('createConfigStore defaults to evolution_network enabled true and persists 
     await store.set(updated);
     const reloaded = await store.read();
     assert.deepEqual(reloaded, updated);
+  });
+});
+
+test('read merges defaults when config fields are missing', async () => {
+  await withTempHome(async () => {
+    const store = createConfigStore();
+    await store.ensureLayout();
+    const partial = {
+      evolution_network: {
+        enabled: false
+      }
+    };
+
+    await fs.writeFile(store.paths.configPath, `${JSON.stringify(partial, null, 2)}\n`, 'utf8');
+    const reloaded = await store.read();
+    assert.deepEqual(reloaded, {
+      evolution_network: {
+        enabled: false,
+        autoAdoptSameSkillSameScope: false,
+        autoRecordExecutions: false
+      }
+    });
+  });
+});
+
+test('read ignores non-boolean config values and falls back to defaults', async () => {
+  await withTempHome(async () => {
+    const store = createConfigStore();
+    await store.ensureLayout();
+    const invalid = {
+      evolution_network: {
+        enabled: 'nope',
+        autoAdoptSameSkillSameScope: 1,
+        autoRecordExecutions: null
+      }
+    };
+
+    await fs.writeFile(store.paths.configPath, `${JSON.stringify(invalid, null, 2)}\n`, 'utf8');
+    const reloaded = await store.read();
+    assert.deepEqual(reloaded, {
+      evolution_network: {
+        enabled: true,
+        autoAdoptSameSkillSameScope: false,
+        autoRecordExecutions: false
+      }
+    });
+  });
+});
+
+test('read throws when config file contains malformed JSON', async () => {
+  await withTempHome(async () => {
+    const store = createConfigStore();
+    await store.ensureLayout();
+    await fs.writeFile(store.paths.configPath, '{ not json', 'utf8');
+    await assert.rejects(() => store.read(), { name: 'SyntaxError' });
   });
 });
