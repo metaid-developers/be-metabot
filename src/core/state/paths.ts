@@ -8,6 +8,12 @@ export interface MetabotPaths {
   runtimeStatePath: string;
   daemonStatePath: string;
   secretsPath: string;
+  configPath: string;
+  evolutionRoot: string;
+  evolutionExecutionsRoot: string;
+  evolutionAnalysesRoot: string;
+  evolutionArtifactsRoot: string;
+  evolutionIndexPath: string;
 }
 
 export function resolveMetabotPaths(homeDir: string): MetabotPaths {
@@ -18,6 +24,12 @@ export function resolveMetabotPaths(homeDir: string): MetabotPaths {
   const baseRoot = path.join(homeDir, '.metabot');
   const hotRoot = path.join(baseRoot, 'hot');
   const exportRoot = path.join(baseRoot, 'exports');
+  const configPath = path.join(hotRoot, 'config.json');
+  const evolutionRoot = path.join(baseRoot, 'evolution');
+  const evolutionExecutionsRoot = path.join(evolutionRoot, 'executions');
+  const evolutionAnalysesRoot = path.join(evolutionRoot, 'analyses');
+  const evolutionArtifactsRoot = path.join(evolutionRoot, 'artifacts');
+  const evolutionIndexPath = path.join(evolutionRoot, 'index.json');
 
   return {
     baseRoot,
@@ -26,6 +38,12 @@ export function resolveMetabotPaths(homeDir: string): MetabotPaths {
     runtimeDbPath: path.join(hotRoot, 'runtime.sqlite'),
     runtimeStatePath: path.join(hotRoot, 'runtime-state.json'),
     daemonStatePath: path.join(hotRoot, 'daemon.json'),
-    secretsPath: path.join(hotRoot, 'secrets.json')
+    secretsPath: path.join(hotRoot, 'secrets.json'),
+    configPath,
+    evolutionRoot,
+    evolutionExecutionsRoot,
+    evolutionAnalysesRoot,
+    evolutionArtifactsRoot,
+    evolutionIndexPath
   };
 }
