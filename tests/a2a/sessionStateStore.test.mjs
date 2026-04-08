@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -263,6 +264,61 @@ test('session state store serializes concurrent updates without dropping data', 
     caller: 'cursor-a',
     provider: 'cursor-b',
   });
+});
+
+test('session state store serializes concurrent updates across processes', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-a2a-multiprocess-'));
+  const distModulePath = path.join(process.cwd(), 'dist/core/a2a/sessionStateStore.js');
+
+  const runWorker = (id) =>
+    new Promise((resolve, reject) => {
+      const child = spawn(
+        process.execPath,
+        [
+          '-e',
+          `
+            const { createSessionStateStore } = require(${JSON.stringify(distModulePath)});
+            const store = createSessionStateStore(${JSON.stringify(homeDir)});
+            const suffix = ${JSON.stringify(id)};
+            store.appendTranscriptItems([{
+              id: 'tx-' + suffix,
+              sessionId: 'session-1',
+              timestamp: Date.now(),
+              type: 'message',
+              sender: 'caller',
+              content: 'from-' + suffix,
+              metadata: null,
+            }]).then(() => process.exit(0)).catch((error) => {
+              console.error(error && error.stack ? error.stack : String(error));
+              process.exit(1);
+            });
+          `,
+        ],
+        { stdio: ['ignore', 'pipe', 'pipe'] }
+      );
+
+      let stderr = '';
+      child.stderr.on('data', chunk => {
+        stderr += chunk.toString();
+      });
+      child.on('exit', code => {
+        if (code === 0) {
+          resolve(undefined);
+          return;
+        }
+        reject(new Error(stderr || `worker ${id} exited with code ${code}`));
+      });
+      child.on('error', reject);
+    });
+
+  await Promise.all([runWorker('one'), runWorker('two')]);
+
+  const store = createSessionStateStore(homeDir);
+  const state = await store.readState();
+  assert.deepEqual(
+    state.transcriptItems.map(item => item.id).sort(),
+    ['tx-one', 'tx-two'],
+  );
 });
 
 test('session state store treats invalid json as empty state instead of bricking reads', async () => {

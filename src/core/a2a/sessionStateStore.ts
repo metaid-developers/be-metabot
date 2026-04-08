@@ -205,7 +205,7 @@ async function withLock<T>(lockPath: string, operation: () => Promise<T>): Promi
         }
         const staleThreshold = lockPid ? LOCKFILE_STALE_WITH_PID_MS : LOCKFILE_STALE_WITHOUT_PID_MS;
         const stale = Date.now() - acquiredAt > staleThreshold;
-        if (stale) {
+        if (!lockPid && stale) {
           await fs.rm(lockPath, { force: true });
           continue;
         }
