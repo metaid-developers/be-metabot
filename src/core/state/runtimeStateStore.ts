@@ -62,7 +62,7 @@ function cloneEmptyState(): RuntimeState {
   };
 }
 
-async function ensureHotLayout(paths: MetabotPaths): Promise<void> {
+export async function ensureHotLayout(paths: MetabotPaths): Promise<void> {
   await fs.mkdir(paths.hotRoot, { recursive: true });
 }
 
