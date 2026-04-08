@@ -21,19 +21,28 @@ test('provider completion maps to completed', () => {
   assert.equal(mapPublicStatus({ event: 'provider_completed' }), 'completed');
 });
 
-test('resolvePublicStatus surfaces raw unknown events via resolution metadata', () => {
+test('resolvePublicStatus surfaces raw unknown events as unmapped', () => {
   const resolution = resolvePublicStatus({ event: 'provider_cancelled' });
-  assert.equal(resolution.status, 'local_runtime_error');
+  assert.equal(resolution.status, null);
   assert.equal(resolution.rawEvent, 'provider_cancelled');
-  assert.equal(mapPublicStatus({}), 'local_runtime_error');
+  assert.equal(resolution.mapped, false);
+  assert.equal(mapPublicStatus({}), null);
 });
 
-test('prototype-edge event names do not slip through the resolver', () => {
+test('prototype-edge event names remain unmapped', () => {
   const resolution = resolvePublicStatus({ event: 'toString' });
-  assert.equal(resolution.status, 'local_runtime_error');
+  assert.equal(resolution.status, null);
   assert.equal(resolution.rawEvent, 'toString');
+  assert.equal(resolution.mapped, false);
 });
 
-test('mapPublicStatus handles missing input by surfacing the exception state', () => {
-  assert.equal(mapPublicStatus(undefined), 'local_runtime_error');
+test('mapPublicStatus handles missing input by keeping unmapped state', () => {
+  assert.equal(mapPublicStatus(undefined), null);
+});
+
+test('known mapped events still expose rawEvent metadata', () => {
+  const resolution = resolvePublicStatus({ event: 'timeout' });
+  assert.equal(resolution.status, 'timeout');
+  assert.equal(resolution.rawEvent, 'timeout');
+  assert.equal(resolution.mapped, true);
 });

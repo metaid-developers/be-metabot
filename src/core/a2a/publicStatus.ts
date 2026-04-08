@@ -33,9 +33,11 @@ export type TraceEventInput = {
 };
 
 export type PublicStatusResolution = {
-  status: PublicStatus;
+  status: PublicStatus | null;
   /** The raw event label seen by the resolver (if any) for future tracing/debugging. */
   rawEvent?: string;
+  /** Indicates whether the trace event was explicitly mapped to a public status. */
+  mapped: boolean;
 };
 
 const eventMap: Record<TraceDerivedEventName, PublicStatus> = {
@@ -57,15 +59,16 @@ export function resolvePublicStatus(trace?: TraceEventInput): PublicStatusResolu
     return {
       status: eventMap[event as TraceDerivedEventName],
       rawEvent: event,
+      mapped: true,
     };
   }
 
-  return { status: 'local_runtime_error', rawEvent: event };
+  return { status: null, rawEvent: event, mapped: false };
 }
 
 /**
  * Convenience helper for consumers that only need the status value.
  */
-export function mapPublicStatus(trace?: TraceEventInput): PublicStatus {
+export function mapPublicStatus(trace?: TraceEventInput): PublicStatus | null {
   return resolvePublicStatus(trace).status;
 }
