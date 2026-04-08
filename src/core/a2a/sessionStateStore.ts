@@ -10,8 +10,9 @@ const SESSION_STATE_FILENAME = 'a2a-session-state.json';
 const SESSION_STATE_SCHEMA_VERSION = 1;
 const MAX_TRANSCRIPT_ITEMS = 2_000;
 const MAX_PUBLIC_STATUS_SNAPSHOTS = 1_000;
-const LOCKFILE_RETRY_DELAY_MS = 20;
-const LOCKFILE_MAX_ATTEMPTS = 50;
+const LOCKFILE_BASE_DELAY_MS = 25;
+const LOCKFILE_MAX_ATTEMPTS = 200;
+const LOCKFILE_STALE_MS = 30_000;
 
 export type A2ATranscriptSender = 'caller' | 'provider' | 'system';
 export type A2ALoopCursor = string | number | null;
@@ -89,7 +90,16 @@ async function readJsonFile<T>(filePath: string): Promise<T | null> {
     return JSON.parse(raw) as T;
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT' || error instanceof SyntaxError) {
+    if (code === 'ENOENT') {
+      return null;
+    }
+    if (error instanceof SyntaxError) {
+      const corruptPath = `${filePath}.corrupt-${Date.now()}`;
+      try {
+        await fs.rename(filePath, corruptPath);
+      } catch {
+        // Best effort quarantine so malformed hot state does not brick future reads.
+      }
       return null;
     }
     throw error;
@@ -98,8 +108,27 @@ async function readJsonFile<T>(filePath: string): Promise<T | null> {
 
 async function writeJsonFileAtomically(filePath: string, value: unknown): Promise<void> {
   const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-  await fs.rename(tempPath, filePath);
+  let handle: fs.FileHandle | null = null;
+  try {
+    handle = await fs.open(tempPath, 'w');
+    await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    await handle.sync();
+    await handle.close();
+    handle = null;
+    await fs.rename(tempPath, filePath);
+    const directoryHandle = await fs.open(path.dirname(filePath), 'r');
+    try {
+      await directoryHandle.sync();
+    } finally {
+      await directoryHandle.close();
+    }
+  } catch (error) {
+    if (handle) {
+      await handle.close();
+    }
+    await fs.rm(tempPath, { force: true });
+    throw error;
+  }
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -113,17 +142,31 @@ async function withLock<T>(lockPath: string, operation: () => Promise<T>): Promi
     try {
       const handle = await fs.open(lockPath, 'wx');
       try {
+        await handle.writeFile(`${JSON.stringify({ pid: process.pid, acquiredAt: Date.now() })}\n`, 'utf8');
         return await operation();
       } finally {
         await handle.close();
-        await fs.rm(lockPath, { force: true });
+        try {
+          await fs.rm(lockPath, { force: true });
+        } catch {
+          // Best effort cleanup; stale lock recovery handles leftover lock files later.
+        }
       }
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== 'EEXIST') {
         throw error;
       }
-      await sleep(LOCKFILE_RETRY_DELAY_MS);
+      try {
+        const stat = await fs.stat(lockPath);
+        if (Date.now() - stat.mtimeMs > LOCKFILE_STALE_MS) {
+          await fs.rm(lockPath, { force: true });
+          continue;
+        }
+      } catch {
+        // Another writer may have released the lock between stat/remove attempts.
+      }
+      await sleep(Math.min(LOCKFILE_BASE_DELAY_MS * (attempt + 1), 250));
     }
   }
 
@@ -149,18 +192,21 @@ function normalizeState(value: A2ASessionStoreState | null): A2ASessionStoreStat
     return cloneEmptyState();
   }
 
+  const source = value as unknown as Record<string, unknown>;
+
   return {
-    version: SESSION_STATE_SCHEMA_VERSION,
-    sessions: Array.isArray(value.sessions) ? value.sessions : [],
-    taskRuns: Array.isArray(value.taskRuns) ? value.taskRuns : [],
-    transcriptItems: Array.isArray(value.transcriptItems)
-      ? value.transcriptItems.slice(-MAX_TRANSCRIPT_ITEMS)
+    ...source,
+    version: typeof source.version === 'number' ? source.version : SESSION_STATE_SCHEMA_VERSION,
+    sessions: Array.isArray(source.sessions) ? source.sessions : [],
+    taskRuns: Array.isArray(source.taskRuns) ? source.taskRuns : [],
+    transcriptItems: Array.isArray(source.transcriptItems)
+      ? source.transcriptItems.slice(-MAX_TRANSCRIPT_ITEMS)
       : [],
-    cursors: normalizeLoopCursors(value.cursors),
-    publicStatusSnapshots: Array.isArray(value.publicStatusSnapshots)
-      ? value.publicStatusSnapshots.slice(-MAX_PUBLIC_STATUS_SNAPSHOTS)
+    cursors: normalizeLoopCursors(source.cursors as Partial<A2ALoopCursors> | null | undefined),
+    publicStatusSnapshots: Array.isArray(source.publicStatusSnapshots)
+      ? source.publicStatusSnapshots.slice(-MAX_PUBLIC_STATUS_SNAPSHOTS)
       : [],
-  };
+  } as A2ASessionStoreState;
 }
 
 export function createSessionStateStore(homeDirOrPaths: string | MetabotPaths): A2ASessionStateStore {
@@ -237,10 +283,18 @@ export function createSessionStateStore(homeDirOrPaths: string | MetabotPaths): 
       }
       await this.updateState(state => ({
         ...state,
-        transcriptItems: [
-          ...state.transcriptItems,
-          ...items.filter(item => !state.transcriptItems.some(existing => existing.id === item.id)),
-        ].slice(-MAX_TRANSCRIPT_ITEMS),
+        transcriptItems: (() => {
+          const seenIds = new Set(state.transcriptItems.map(item => item.id));
+          const nextItems = [];
+          for (const item of items) {
+            if (seenIds.has(item.id)) {
+              continue;
+            }
+            seenIds.add(item.id);
+            nextItems.push(item);
+          }
+          return [...state.transcriptItems, ...nextItems].slice(-MAX_TRANSCRIPT_ITEMS);
+        })(),
       }));
       return items;
     },
@@ -249,25 +303,30 @@ export function createSessionStateStore(homeDirOrPaths: string | MetabotPaths): 
         return items;
       }
       const snapshotKey = (snapshot: A2APublicStatusSnapshot): string =>
-        [
+        JSON.stringify([
           snapshot.sessionId,
           snapshot.taskRunId || '',
           snapshot.status || '',
           snapshot.rawEvent || '',
           String(snapshot.mapped),
           String(snapshot.resolvedAt),
-        ].join(':');
+        ]);
       await this.updateState(state => ({
         ...state,
-        publicStatusSnapshots: [
-          ...state.publicStatusSnapshots,
-          ...items.filter(snapshot => {
+        publicStatusSnapshots: (() => {
+          const seenKeys = new Set(state.publicStatusSnapshots.map(snapshotKey));
+          const nextSnapshots = [];
+          for (const snapshot of items) {
             const incomingKey = snapshotKey(snapshot);
-            return !state.publicStatusSnapshots.some(
-              existing => snapshotKey(existing) === incomingKey,
-            );
-          }),
-        ].slice(-MAX_PUBLIC_STATUS_SNAPSHOTS),
+            if (seenKeys.has(incomingKey)) {
+              continue;
+            }
+            seenKeys.add(incomingKey);
+            nextSnapshots.push(snapshot);
+          }
+          return [...state.publicStatusSnapshots, ...nextSnapshots]
+            .slice(-MAX_PUBLIC_STATUS_SNAPSHOTS);
+        })(),
       }));
       return items;
     },

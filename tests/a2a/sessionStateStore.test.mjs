@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -130,6 +130,26 @@ test('session state store appends transcript items and public status snapshots',
       metadata: null,
     },
   ]);
+  await store.appendTranscriptItems([
+    {
+      id: 'tx-2',
+      sessionId: 'session-1',
+      timestamp: 1_744_444_444_600,
+      type: 'result',
+      sender: 'provider',
+      content: 'duplicate from same batch should be ignored',
+      metadata: null,
+    },
+    {
+      id: 'tx-2',
+      sessionId: 'session-1',
+      timestamp: 1_744_444_444_601,
+      type: 'result',
+      sender: 'provider',
+      content: 'duplicate from same batch should also be ignored',
+      metadata: null,
+    },
+  ]);
   assert.equal((await store.readState()).transcriptItems.length, 2);
 });
 
@@ -241,4 +261,7 @@ test('session state store treats invalid json as empty state instead of bricking
   assert.deepEqual(state.sessions, []);
   assert.deepEqual(state.taskRuns, []);
   assert.deepEqual(state.transcriptItems, []);
+  assert.ok(
+    readdirSync(path.dirname(store.sessionStatePath)).some(entry => entry.startsWith('a2a-session-state.json.corrupt-'))
+  );
 });
