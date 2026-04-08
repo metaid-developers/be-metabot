@@ -25,6 +25,11 @@ import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import { postBuzzToChain } from '../core/buzz/postBuzz';
 import { runBootstrapFlow } from '../core/bootstrap/bootstrapFlow';
 import { readChainDirectoryWithFallback } from '../core/discovery/chainDirectoryReader';
+import { createSessionStateStore } from '../core/a2a/sessionStateStore';
+import { createA2ASessionEngine } from '../core/a2a/sessionEngine';
+import { resolvePublicStatus } from '../core/a2a/publicStatus';
+import { createServiceRunnerRegistry } from '../core/a2a/provider/serviceRunnerRegistry';
+import type { A2ASessionRecord, A2ATaskRunRecord } from '../core/a2a/sessionTypes';
 import {
   createLocalIdentitySyncStep,
   createLocalMetabotStep,
@@ -102,6 +107,7 @@ function readCallRequest(rawInput: Record<string, unknown>) {
     taskContext: normalizeText(request.taskContext),
     rawRequest: normalizeText(request.rawRequest),
     spendCap: readObject(request.spendCap),
+    policyMode: request.policyMode,
   };
 }
 
@@ -382,6 +388,32 @@ async function executeRemoteServiceCall(input: {
   }
 }
 
+async function persistSessionMutation(
+  sessionStateStore: ReturnType<typeof createSessionStateStore>,
+  mutation: {
+    session: A2ASessionRecord;
+    taskRun: A2ATaskRunRecord;
+    event: string;
+  },
+) {
+  await sessionStateStore.writeSession(mutation.session);
+  await sessionStateStore.writeTaskRun(mutation.taskRun);
+
+  const publicStatus = resolvePublicStatus({ event: mutation.event });
+  await sessionStateStore.appendPublicStatusSnapshots([
+    {
+      sessionId: mutation.session.sessionId,
+      taskRunId: mutation.taskRun.runId,
+      status: publicStatus.status,
+      mapped: publicStatus.mapped,
+      rawEvent: publicStatus.rawEvent ?? null,
+      resolvedAt: mutation.session.updatedAt,
+    },
+  ]);
+
+  return publicStatus;
+}
+
 async function fetchPeerChatPublicKey(globalMetaId: string): Promise<string | null> {
   const normalized = normalizeText(globalMetaId);
   if (!normalized) return null;
@@ -425,6 +457,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const secretStore = input.secretStore ?? createFileSecretStore(input.homeDir);
   const signer = input.signer ?? createLocalMnemonicSigner({ secretStore });
   const runtimeStateStore = createRuntimeStateStore(input.homeDir);
+  const sessionStateStore = createSessionStateStore(input.homeDir);
+  const sessionEngine = createA2ASessionEngine();
 
   return {
     chain: {
@@ -724,6 +758,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             taskContext: request.taskContext,
             rawRequest: request.rawRequest,
             spendCap: request.spendCap as { amount: string; currency: 'SPACE' | 'BTC' | 'DOGE' } | null,
+            policyMode: request.policyMode,
           },
           availableServices,
         });
@@ -743,12 +778,20 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('service_not_found', 'Published service was not found in the available service directory.');
         }
 
-        let remoteExecution: Record<string, unknown> | null = null;
+        const started = sessionEngine.startCallerSession({
+          traceId: plan.traceId,
+          servicePinId: plan.service.servicePinId,
+          callerGlobalMetaId: state.identity.globalMetaId,
+          providerGlobalMetaId: plan.service.providerGlobalMetaId,
+          userTask: request.userTask,
+          taskContext: request.taskContext,
+        });
+
         if (request.providerDaemonBaseUrl) {
           const execution = await executeRemoteServiceCall({
             providerDaemonBaseUrl: request.providerDaemonBaseUrl,
             traceId: plan.traceId,
-            externalConversationId: plan.session.externalConversationId,
+            externalConversationId: started.linkage.externalConversationId,
             servicePinId: plan.service.servicePinId,
             providerGlobalMetaId: plan.service.providerGlobalMetaId,
             buyer: state.identity,
@@ -763,13 +806,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
             }
             return execution;
           }
-          remoteExecution = execution.data;
         }
+
+        const publicStatus = await persistSessionMutation(sessionStateStore, started);
 
         const serviceDisplayName = normalizeText(service.displayName) || normalizeText(service.serviceName);
         const trace = buildSessionTrace({
           traceId: plan.traceId,
-          channel: 'metaweb_order',
+          channel: 'a2a',
           exportRoot: runtimeStateStore.paths.exportRoot,
           session: {
             id: `session-${plan.traceId}`,
@@ -778,7 +822,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             metabotId: state.identity.metabotId,
             peerGlobalMetaId: normalizeText(service.providerGlobalMetaId),
             peerName: serviceDisplayName,
-            externalConversationId: plan.session.externalConversationId,
+            externalConversationId: started.linkage.externalConversationId,
           },
           order: {
             id: `order-${plan.traceId}`,
@@ -810,27 +854,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 id: `${trace.traceId}-assistant`,
                 type: 'assistant',
                 timestamp: trace.createdAt,
-                content: remoteExecution
-                  ? `Local MetaBot runtime executed a remote call to ${serviceDisplayName}.`
-                  : `Local MetaBot runtime planned a remote call to ${serviceDisplayName}.`,
+                content: `Local MetaBot runtime created a remote MetaBot task session for ${serviceDisplayName}.`,
                 metadata: {
                   servicePinId: plan.service.servicePinId,
                   providerGlobalMetaId: normalizeText(service.providerGlobalMetaId),
+                  confirmationPolicyMode: plan.confirmation.policyMode,
+                  confirmationRequired: plan.confirmation.requiresConfirmation,
                   providerDaemonBaseUrl: request.providerDaemonBaseUrl || null,
                 },
               },
-              ...(remoteExecution && normalizeText(remoteExecution.responseText)
-                ? [{
-                    id: `${trace.traceId}-remote-result`,
-                    type: 'assistant',
-                    timestamp: trace.createdAt,
-                    content: normalizeText(remoteExecution.responseText),
-                    metadata: {
-                      providerTraceJsonPath: normalizeText(remoteExecution.traceJsonPath) || null,
-                      providerTraceMarkdownPath: normalizeText(remoteExecution.traceMarkdownPath) || null,
-                    },
-                  }]
-                : []),
             ],
           },
         });
@@ -845,16 +877,24 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         return commandSuccess({
           traceId: trace.traceId,
-          externalConversationId: trace.session.externalConversationId,
+          providerGlobalMetaId: plan.service.providerGlobalMetaId,
+          serviceName: serviceDisplayName,
+          service: plan.service,
+          payment: plan.payment,
+          confirmation: plan.confirmation,
+          session: {
+            sessionId: started.session.sessionId,
+            taskRunId: started.taskRun.runId,
+            role: started.session.role,
+            state: started.session.state,
+            publicStatus: publicStatus.status,
+            event: started.event,
+            coworkSessionId: started.linkage.coworkSessionId,
+            externalConversationId: started.linkage.externalConversationId,
+          },
           traceJsonPath: artifacts.traceJsonPath,
           traceMarkdownPath: artifacts.traceMarkdownPath,
           transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
-          providerGlobalMetaId: plan.service.providerGlobalMetaId,
-          serviceName: serviceDisplayName,
-          responseText: remoteExecution ? normalizeText(remoteExecution.responseText) : '',
-          providerTraceJsonPath: remoteExecution ? normalizeText(remoteExecution.traceJsonPath) : '',
-          providerTraceMarkdownPath: remoteExecution ? normalizeText(remoteExecution.traceMarkdownPath) : '',
-          providerTranscriptMarkdownPath: remoteExecution ? normalizeText(remoteExecution.transcriptMarkdownPath) : '',
         });
       },
       execute: async (rawInput) => {
@@ -889,16 +929,62 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
 
         const traceId = execution.traceId || `trace-${sanitizeServiceSegment(service.serviceName)}-${Date.now().toString(36)}`;
-        const responseText = renderDemoRemoteServiceResponse({
-          serviceName: service.serviceName,
-          displayName: service.displayName,
+        const received = sessionEngine.receiveProviderTask({
+          traceId,
+          servicePinId: service.currentPinId,
+          callerGlobalMetaId: execution.buyer.globalMetaId,
+          providerGlobalMetaId: execution.providerGlobalMetaId,
           userTask: execution.request.userTask,
           taskContext: execution.request.taskContext,
         });
+        await persistSessionMutation(sessionStateStore, received);
+
+        const runnerRegistry = createServiceRunnerRegistry([
+          {
+            servicePinId: service.currentPinId,
+            providerSkill: service.providerSkill,
+            runner: async ({ userTask, taskContext }) => ({
+              state: 'completed',
+              responseText: renderDemoRemoteServiceResponse({
+                serviceName: service.serviceName,
+                displayName: service.displayName,
+                userTask,
+                taskContext,
+              }),
+            }),
+          },
+        ]);
+        const runnerResult = await runnerRegistry.execute({
+          servicePinId: service.currentPinId,
+          providerSkill: service.providerSkill,
+          providerGlobalMetaId: execution.providerGlobalMetaId,
+          userTask: execution.request.userTask,
+          taskContext: execution.request.taskContext,
+          metadata: {
+            traceId,
+            externalConversationId: execution.externalConversationId || null,
+            buyer: execution.buyer,
+          },
+        });
+        const applied = sessionEngine.applyProviderRunnerResult({
+          session: received.session,
+          taskRun: received.taskRun,
+          result: runnerResult,
+        });
+        await persistSessionMutation(sessionStateStore, applied);
+
+        const responseText = runnerResult.state === 'completed'
+          ? normalizeText(runnerResult.responseText)
+          : '';
+        const providerMessage = runnerResult.state === 'completed'
+          ? normalizeText(runnerResult.responseText)
+          : runnerResult.state === 'needs_clarification'
+            ? normalizeText(runnerResult.question)
+            : normalizeText(runnerResult.message);
 
         const trace = buildSessionTrace({
           traceId,
-          channel: 'metaweb_order',
+          channel: 'a2a',
           exportRoot: runtimeStateStore.paths.exportRoot,
           session: {
             id: `session-${traceId}`,
@@ -941,10 +1027,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 id: `${trace.traceId}-provider`,
                 type: 'assistant',
                 timestamp: trace.createdAt,
-                content: responseText,
+                content: providerMessage,
                 metadata: {
                   servicePinId: service.currentPinId,
                   providerGlobalMetaId: state.identity.globalMetaId,
+                  providerSessionId: received.session.sessionId,
+                  providerTaskRunId: received.taskRun.runId,
+                  providerEvent: applied.event,
                 },
               },
             ],
@@ -958,6 +1047,17 @@ export function createDefaultMetabotDaemonHandlers(input: {
             ...state.traces.filter((entry) => entry.traceId !== trace.traceId),
           ],
         });
+
+        if (runnerResult.state === 'needs_clarification') {
+          return commandManualActionRequired(
+            'clarification_needed',
+            runnerResult.question,
+            `/ui/trace?traceId=${encodeURIComponent(trace.traceId)}`,
+          );
+        }
+        if (runnerResult.state === 'failed') {
+          return commandFailed(runnerResult.code, runnerResult.message);
+        }
 
         return commandSuccess({
           traceId: trace.traceId,

@@ -104,7 +104,35 @@ async function startServer() {
         }
         return commandSuccess({
           traceId: 'trace-weather-123',
-          externalConversationId: 'metaweb_order:buyer:gm-weather-seller:trace-weather-1',
+          service: {
+            servicePinId: 'service-weather',
+            providerGlobalMetaId: 'gm-weather-seller',
+            serviceName: 'Weather Oracle',
+            price: '0.00001',
+            currency: 'SPACE',
+          },
+          payment: {
+            amount: '0.00001',
+            currency: 'SPACE',
+          },
+          confirmation: {
+            requiresConfirmation: true,
+            policyMode: 'confirm_all',
+            policyReason: 'confirm_all_requires_confirmation',
+            requestedPolicyMode: 'confirm_all',
+            confirmationBypassed: false,
+            bypassReason: null,
+          },
+          session: {
+            sessionId: 'session-weather-123',
+            taskRunId: 'run-weather-123',
+            role: 'caller',
+            state: 'requesting_remote',
+            publicStatus: 'requesting_remote',
+            event: 'request_sent',
+            coworkSessionId: null,
+            externalConversationId: 'a2a-session:gm-weather-seller:trace-weather-1',
+          },
         });
       },
       execute: async (input) => {
@@ -342,7 +370,7 @@ test('GET /api/network/services forwards query filters to network.listServices',
   assert.equal(payload.data.services[0].servicePinId, 'service-weather');
 });
 
-test('POST /api/services/call returns successful task-level call output', async (t) => {
+test('POST /api/services/call returns a delegation, session, and trace start contract', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
 
@@ -371,7 +399,35 @@ test('POST /api/services/call returns successful task-level call output', async 
     state: 'success',
     data: {
       traceId: 'trace-weather-123',
-      externalConversationId: 'metaweb_order:buyer:gm-weather-seller:trace-weather-1',
+      service: {
+        servicePinId: 'service-weather',
+        providerGlobalMetaId: 'gm-weather-seller',
+        serviceName: 'Weather Oracle',
+        price: '0.00001',
+        currency: 'SPACE',
+      },
+      payment: {
+        amount: '0.00001',
+        currency: 'SPACE',
+      },
+      confirmation: {
+        requiresConfirmation: true,
+        policyMode: 'confirm_all',
+        policyReason: 'confirm_all_requires_confirmation',
+        requestedPolicyMode: 'confirm_all',
+        confirmationBypassed: false,
+        bypassReason: null,
+      },
+      session: {
+        sessionId: 'session-weather-123',
+        taskRunId: 'run-weather-123',
+        role: 'caller',
+        state: 'requesting_remote',
+        publicStatus: 'requesting_remote',
+        event: 'request_sent',
+        coworkSessionId: null,
+        externalConversationId: 'a2a-session:gm-weather-seller:trace-weather-1',
+      },
     },
   });
 });
@@ -382,7 +438,7 @@ test('POST /api/services/execute forwards remote execution payloads to services.
 
   const request = {
     traceId: 'trace-weather-123',
-    externalConversationId: 'metaweb_order:buyer:gm-weather-seller:trace-weather-1',
+    externalConversationId: 'a2a-session:gm-weather-seller:trace-weather-1',
     servicePinId: 'service-weather',
     providerGlobalMetaId: 'gm-weather-seller',
     buyer: {
@@ -412,7 +468,7 @@ test('POST /api/services/execute forwards remote execution payloads to services.
     state: 'success',
     data: {
       traceId: 'trace-weather-123',
-      externalConversationId: 'metaweb_order:buyer:gm-weather-seller:trace-weather-1',
+      externalConversationId: 'a2a-session:gm-weather-seller:trace-weather-1',
       responseText: 'Tomorrow will be bright with a light wind.',
       providerGlobalMetaId: 'gm-weather-seller',
       servicePinId: 'service-weather',

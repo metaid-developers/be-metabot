@@ -416,7 +416,15 @@ test('services call stores a trace that trace get can read back from the local r
   assert.equal(called.exitCode, 0);
   assert.equal(called.payload.ok, true);
   assert.match(called.payload.data.traceId, /^trace-/);
-  assert.match(called.payload.data.externalConversationId, /^metaweb_order:buyer:/);
+  assert.equal(called.payload.data.session.role, 'caller');
+  assert.equal(called.payload.data.session.state, 'requesting_remote');
+  assert.equal(called.payload.data.session.publicStatus, 'requesting_remote');
+  assert.equal(called.payload.data.session.event, 'request_sent');
+  assert.match(called.payload.data.session.externalConversationId, /^a2a-session:/);
+  assert.equal(called.payload.data.confirmation.requiresConfirmation, true);
+  assert.equal(called.payload.data.confirmation.policyMode, 'confirm_all');
+  assert.equal(called.payload.data.confirmation.policyReason, 'confirm_all_requires_confirmation');
+  assert.equal(called.payload.data.confirmation.requestedPolicyMode, 'confirm_all');
   assert.match(called.payload.data.traceJsonPath, /\/\.metabot\/exports\/traces\/.*\.json$/);
   assert.match(called.payload.data.traceMarkdownPath, /\/\.metabot\/exports\/traces\/.*\.md$/);
 
@@ -434,9 +442,18 @@ test('services call stores a trace that trace get can read back from the local r
 
   const traceMarkdown = await readFile(called.payload.data.traceMarkdownPath, 'utf8');
   assert.match(traceMarkdown, /Weather Oracle/);
+
+  const sessionState = JSON.parse(
+    await readFile(path.join(homeDir, '.metabot', 'hot', 'a2a-session-state.json'), 'utf8')
+  );
+  const callerSession = sessionState.sessions.find((entry) => entry.traceId === called.payload.data.traceId);
+  const callerTaskRun = sessionState.taskRuns.find((entry) => entry.runId === called.payload.data.session.taskRunId);
+  assert.equal(callerSession.role, 'caller');
+  assert.equal(callerSession.state, 'requesting_remote');
+  assert.equal(callerTaskRun.state, 'queued');
 });
 
-test('services call can execute a remote provider daemon and return the remote result to the caller runtime', async (t) => {
+test('services call returns an A2A start contract while provider execution flows through provider session state', async (t) => {
   const callerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-caller-'));
   const providerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-provider-'));
   t.after(async () => stopDaemon(callerHome));
@@ -483,12 +500,15 @@ test('services call can execute a remote provider daemon and return the remote r
   assert.equal(called.exitCode, 0);
   assert.equal(called.payload.ok, true);
   assert.match(called.payload.data.traceId, /^trace-/);
+  assert.equal(called.payload.data.session.role, 'caller');
+  assert.equal(called.payload.data.session.state, 'requesting_remote');
+  assert.equal(called.payload.data.session.publicStatus, 'requesting_remote');
+  assert.equal(called.payload.data.confirmation.policyMode, 'confirm_all');
   assert.equal(called.payload.data.providerGlobalMetaId, providerIdentity.payload.data.globalMetaId);
   assert.equal(called.payload.data.serviceName, 'Weather Oracle');
-  assert.match(called.payload.data.responseText, /Tomorrow will be bright/i);
-  assert.match(called.payload.data.providerTraceJsonPath, /\/\.metabot\/exports\/traces\/.*\.json$/);
-  assert.match(called.payload.data.providerTraceMarkdownPath, /\/\.metabot\/exports\/traces\/.*\.md$/);
-  assert.match(called.payload.data.providerTranscriptMarkdownPath, /\/\.metabot\/exports\/chats\/.*\.md$/);
+  assert.equal('responseText' in called.payload.data, false);
+  assert.equal('providerTraceJsonPath' in called.payload.data, false);
+  assert.equal('providerTraceMarkdownPath' in called.payload.data, false);
 
   const callerTrace = await runCommand(callerHome, ['trace', 'get', '--trace-id', called.payload.data.traceId]);
   assert.equal(callerTrace.exitCode, 0);
@@ -497,7 +517,7 @@ test('services call can execute a remote provider daemon and return the remote r
   assert.equal(callerTrace.payload.data.session.peerGlobalMetaId, providerIdentity.payload.data.globalMetaId);
 
   const callerTranscriptMarkdown = await readFile(called.payload.data.transcriptMarkdownPath, 'utf8');
-  assert.match(callerTranscriptMarkdown, /Tomorrow will be bright/i);
+  assert.match(callerTranscriptMarkdown, /remote MetaBot task session/i);
 
   const providerTrace = await runCommand(providerHome, ['trace', 'get', '--trace-id', called.payload.data.traceId]);
   assert.equal(providerTrace.exitCode, 0);
@@ -505,6 +525,15 @@ test('services call can execute a remote provider daemon and return the remote r
   assert.equal(providerTrace.payload.data.order.role, 'seller');
   assert.equal(providerTrace.payload.data.order.serviceName, 'Weather Oracle');
   assert.equal(providerTrace.payload.data.session.peerGlobalMetaId, callerIdentity.payload.data.globalMetaId);
+
+  const providerSessionState = JSON.parse(
+    await readFile(path.join(providerHome, '.metabot', 'hot', 'a2a-session-state.json'), 'utf8')
+  );
+  const providerSession = providerSessionState.sessions.find((entry) => entry.traceId === called.payload.data.traceId);
+  const providerTaskRun = providerSessionState.taskRuns.find((entry) => entry.sessionId === providerSession.sessionId);
+  assert.equal(providerSession.role, 'provider');
+  assert.equal(providerSession.state, 'completed');
+  assert.equal(providerTaskRun.state, 'completed');
 });
 
 test('chat private encrypts a loopback message and stores a chat trace in the local runtime', async (t) => {
