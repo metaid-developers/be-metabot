@@ -976,6 +976,14 @@ test('services rate publishes one buyer-side skill-service-rate record from a co
   assert.equal(rated.payload.data.serviceId, 'chain-service-pin-1');
   assert.equal(rated.payload.data.servicePaidTx, called.payload.data.paymentTxid);
   assert.equal(rated.payload.data.serverBot, 'idq1provider');
+  assert.equal(rated.payload.data.ratingMessageSent, true);
+  assert.match(rated.payload.data.ratingMessagePinId, /^\/protocols\/simplemsg-pin-/);
+  assert.equal(rated.payload.data.ratingMessageError, null);
+
+  const transcriptMarkdown = await readFile(rated.payload.data.transcriptMarkdownPath, 'utf8');
+  assert.match(transcriptMarkdown, /结果清晰，响应也可靠。/);
+  assert.match(transcriptMarkdown, /我的评分已记录在链上/);
+  assert.match(transcriptMarkdown, /\/protocols\/skill-service-rate-pin-/);
 });
 
 test('chat private encrypts a loopback message and stores a chat trace in the local runtime', async (t) => {

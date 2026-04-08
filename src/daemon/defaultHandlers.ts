@@ -176,6 +176,18 @@ function readServiceRateRequest(rawInput: Record<string, unknown>) {
   };
 }
 
+function buildServiceRatingFollowupMessage(input: {
+  comment: string;
+  ratingPinId: string | null;
+}): string {
+  const base = normalizeText(input.comment);
+  const pinId = normalizeText(input.ratingPinId);
+  const pinLine = pinId
+    ? `\n\n我的评分已记录在链上（pin ID: ${pinId}）。`
+    : '';
+  return `${base}${pinLine}`.trim();
+}
+
 function renderDemoRemoteServiceResponse(input: {
   serviceName: string;
   displayName: string;
@@ -1744,6 +1756,50 @@ export function createDefaultMetabotDaemonHandlers(input: {
           );
         }
 
+        const combinedMessage = buildServiceRatingFollowupMessage({
+          comment: request.comment,
+          ratingPinId: ratingWrite.pinId ?? null,
+        });
+        let ratingMessageSent = false;
+        let ratingMessagePinId: string | null = null;
+        let ratingMessageError: string | null = null;
+        if (combinedMessage) {
+          try {
+            const privateChatIdentity = await signer.getPrivateChatIdentity();
+            const peerChatPublicKey = serverBot === state.identity.globalMetaId
+              ? state.identity.chatPublicKey
+              : await resolvePeerChatPublicKey(serverBot) ?? '';
+            if (!peerChatPublicKey) {
+              throw new Error('Remote MetaBot has no published chat public key on chain.');
+            }
+
+            const outgoingRatingMessage = sendPrivateChat({
+              fromIdentity: {
+                globalMetaId: privateChatIdentity.globalMetaId,
+                privateKeyHex: privateChatIdentity.privateKeyHex,
+              },
+              toGlobalMetaId: serverBot,
+              peerChatPublicKey,
+              content: combinedMessage,
+            });
+
+            const ratingMessageWrite = await signer.writePin({
+              operation: 'create',
+              path: outgoingRatingMessage.path,
+              encryption: outgoingRatingMessage.encryption,
+              version: outgoingRatingMessage.version,
+              contentType: outgoingRatingMessage.contentType,
+              payload: outgoingRatingMessage.payload,
+              encoding: 'utf-8',
+              network: 'mvc',
+            });
+            ratingMessageSent = true;
+            ratingMessagePinId = ratingMessageWrite.pinId ?? null;
+          } catch (error) {
+            ratingMessageError = error instanceof Error ? error.message : String(error);
+          }
+        }
+
         const sessionState = await sessionStateStore.readState();
         const latestSession = sessionState.sessions
           .filter((entry) => entry.traceId === request.traceId)
@@ -1765,9 +1821,33 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 event: 'service_rating_published',
                 rate: String(request.rate),
                 ratingPinId: ratingWrite.pinId ?? null,
+                ratingMessageSent,
+                ratingMessagePinId,
+                ratingMessageError,
               },
             },
           ]);
+          if (combinedMessage) {
+            await appendA2ATranscriptItems(sessionStateStore, [
+              {
+                id: `${trace.traceId}-caller-rating-followup-${Date.now().toString(36)}`,
+                sessionId: latestSession.sessionId,
+                taskRunId: latestSession.currentTaskRunId,
+                timestamp: Date.now() + 1,
+                type: ratingMessageSent ? 'assistant' : 'status_note',
+                sender: ratingMessageSent ? 'caller' : 'system',
+                content: ratingMessageSent
+                  ? combinedMessage
+                  : `Buyer-side rating was published on-chain, but provider follow-up delivery failed: ${ratingMessageError ?? 'unknown error'}`,
+                metadata: {
+                  event: ratingMessageSent ? 'service_rating_message_sent' : 'service_rating_message_failed',
+                  ratingPinId: ratingWrite.pinId ?? null,
+                  ratingMessagePinId,
+                  ratingMessageError,
+                },
+              },
+            ]);
+          }
           const rebuilt = await rebuildCallerTraceArtifacts({
             baseTrace: trace,
             runtimeStateStore,
@@ -1788,6 +1868,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
           servicePaidTx,
           serverBot,
           serviceSkill: payload.serviceSkill,
+          ratingMessageSent,
+          ratingMessagePinId,
+          ratingMessageError,
           traceJsonPath: nextArtifacts.traceJsonPath ?? nextTrace.artifacts.traceJsonPath,
           traceMarkdownPath: nextArtifacts.traceMarkdownPath ?? nextTrace.artifacts.traceMarkdownPath,
           transcriptMarkdownPath: nextArtifacts.transcriptMarkdownPath ?? nextTrace.artifacts.transcriptMarkdownPath,

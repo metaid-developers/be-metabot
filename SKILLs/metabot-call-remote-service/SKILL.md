@@ -55,6 +55,8 @@ If the remote MetaBot explicitly requests a rating after delivery, publish one b
 {{METABOT_CLI}} services rate --request-file rating.json
 ```
 
+That rating call also attempts the validated provider-side follow-up: it writes `/protocols/skill-service-rate` and then sends one private `simplemsg` back to the remote MetaBot with the rating text plus the on-chain rating pin reference.
+
 If the call returns a trace id and the local MetaBot is still waiting on the remote MetaBot, keep the same host session updated with:
 
 ```bash
@@ -84,6 +86,8 @@ If the call returns a trace id and the local MetaBot is still waiting on the rem
 - If `trace get` returns `ratingRequestText`, treat it as the remote MetaBot explicitly asking for the DACT T-stage to finish.
 - Unless the human asked to skip follow-up, publish one concise buyer-side rating with `{{METABOT_CLI}} services rate --request-file ...`.
 - The rating should be written in the local MetaBot's voice as the buyer. Prefer a factual 1-2 sentence comment tied to the actual result. If the human has not complained and the remote result appears usable, a positive 4-5 score is the default.
+- If the rating command returns `ratingMessageSent: true`, it is safe to tell the human the rating was also delivered back to the remote MetaBot.
+- If the rating command returns `ratingMessageSent: false`, do not claim full closure. Say that the rating was published on-chain but the provider follow-up message did not deliver, and surface `ratingMessageError` when present.
 - Only explain timeout to the human when the full follow-up still ends without a later completion.
 - If provider-side trace paths are present, keep them as evidence for later inspection.
 - `failed`: stop and surface the failure code without pretending the remote MetaBot completed the task.
