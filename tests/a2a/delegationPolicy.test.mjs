@@ -40,3 +40,17 @@ test('future-safe modes are accepted but not publicly enabled yet', () => {
   assert.equal(decision.requiresConfirmation, true);
   assert.equal(decision.policyReason, 'policy_mode_not_publicly_enabled');
 });
+
+test('resolveDelegationPolicyMode normalizes trimmed and case-insensitive values', () => {
+  assert.equal(resolveDelegationPolicyMode('  CoNfIrM_AlL  '), 'confirm_all');
+});
+
+test('resolveDelegationPolicyMode falls back for non-string policyMode', () => {
+  assert.equal(resolveDelegationPolicyMode(null), 'confirm_all');
+  assert.equal(resolveDelegationPolicyMode(123), 'confirm_all');
+  assert.equal(resolveDelegationPolicyMode({ mode: 'confirm_all' }), 'confirm_all');
+});
+
+test('resolveDelegationPolicyMode falls back for unknown string policyMode', () => {
+  assert.equal(resolveDelegationPolicyMode('confirm_never'), 'confirm_all');
+});

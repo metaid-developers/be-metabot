@@ -1,4 +1,8 @@
-import type { DelegationPolicyDecision, DelegationPolicyMode } from './sessionTypes';
+import type {
+  DelegationPolicyDecision,
+  DelegationPolicyMode,
+  DelegationPolicyReason,
+} from './sessionTypes';
 
 export interface EvaluateDelegationPolicyInput {
   policyMode?: unknown;
@@ -8,11 +12,16 @@ export interface EvaluateDelegationPolicyInput {
 
 const DEFAULT_POLICY_MODE: DelegationPolicyMode = 'confirm_all';
 const PUBLIC_ENABLED_POLICY_MODES: ReadonlySet<DelegationPolicyMode> = new Set(['confirm_all']);
-const FUTURE_SAFE_POLICY_MODES: ReadonlySet<DelegationPolicyMode> = new Set([
-  'confirm_all',
-  'confirm_paid_only',
-  'auto_when_safe',
-]);
+export const DELEGATION_POLICY_REASON: Readonly<Record<string, DelegationPolicyReason>> = {
+  confirmAllRequiresConfirmation: 'confirm_all_requires_confirmation',
+  policyModeNotPubliclyEnabled: 'policy_mode_not_publicly_enabled',
+};
+
+function isDelegationPolicyMode(value: string): value is DelegationPolicyMode {
+  return value === 'confirm_all'
+    || value === 'confirm_paid_only'
+    || value === 'auto_when_safe';
+}
 
 export function resolveDelegationPolicyMode(
   rawPolicyMode: unknown,
@@ -22,8 +31,8 @@ export function resolveDelegationPolicyMode(
     return fallback;
   }
   const normalized = rawPolicyMode.trim().toLowerCase();
-  if (FUTURE_SAFE_POLICY_MODES.has(normalized as DelegationPolicyMode)) {
-    return normalized as DelegationPolicyMode;
+  if (isDelegationPolicyMode(normalized)) {
+    return normalized;
   }
   return fallback;
 }
@@ -38,7 +47,7 @@ export function evaluateDelegationPolicy(
     return {
       requiresConfirmation: true,
       policyMode: DEFAULT_POLICY_MODE,
-      policyReason: 'policy_mode_not_publicly_enabled',
+      policyReason: DELEGATION_POLICY_REASON.policyModeNotPubliclyEnabled,
       requestedPolicyMode,
       confirmationBypassed: false,
       bypassReason: null,
@@ -47,11 +56,10 @@ export function evaluateDelegationPolicy(
 
   return {
     requiresConfirmation: true,
-    policyMode: DEFAULT_POLICY_MODE,
-    policyReason: 'confirm_all_requires_confirmation',
+    policyMode: requestedPolicyMode,
+    policyReason: DELEGATION_POLICY_REASON.confirmAllRequiresConfirmation,
     requestedPolicyMode,
     confirmationBypassed: false,
     bypassReason: null,
   };
 }
-
