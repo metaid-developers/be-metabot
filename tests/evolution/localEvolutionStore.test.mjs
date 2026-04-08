@@ -218,6 +218,40 @@ test('local evolution store serializes concurrent index updates to avoid lost wr
   assert.equal(index.activeVariants['metabot-trace-inspector'], 'variant-trace-1');
 });
 
+test('local evolution store serializes concurrent index updates across store instances sharing one index path', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+  const storeA = createLocalEvolutionStore(homeDir);
+  const storeB = createLocalEvolutionStore(homeDir);
+
+  const writesA = Array.from({ length: 20 }, (_, index) => {
+    const execution = createExecutionRecord();
+    execution.executionId = `a-exec-${index + 1}`;
+    return storeA.writeExecution(execution);
+  });
+  const writesB = Array.from({ length: 20 }, (_, index) => {
+    const execution = createExecutionRecord();
+    execution.executionId = `b-exec-${index + 1}`;
+    return storeB.writeExecution(execution);
+  });
+
+  await Promise.all([
+    ...writesA,
+    ...writesB,
+    storeA.setActiveVariant('metabot-network-directory', 'variant-a'),
+    storeB.setActiveVariant('metabot-trace-inspector', 'variant-b'),
+  ]);
+
+  const index = await storeA.readIndex();
+  const expectedExecutions = [
+    ...Array.from({ length: 20 }, (_, i) => `a-exec-${i + 1}`),
+    ...Array.from({ length: 20 }, (_, i) => `b-exec-${i + 1}`),
+  ].sort();
+
+  assert.deepEqual(index.executions, expectedExecutions);
+  assert.equal(index.activeVariants['metabot-network-directory'], 'variant-a');
+  assert.equal(index.activeVariants['metabot-trace-inspector'], 'variant-b');
+});
+
 test('local evolution store preserves unknown index fields during updates', async () => {
   const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
   const store = createLocalEvolutionStore(homeDir);

@@ -20,6 +20,7 @@ const KNOWN_INDEX_KEYS = new Set([
 ]);
 
 let atomicWriteSequence = 0;
+const indexUpdateQueues = new Map<string, Promise<void>>();
 
 type StoredSkillEvolutionIndex = SkillEvolutionIndex & Record<string, unknown>;
 
@@ -144,6 +145,23 @@ function validateIdentifier(identifier: string, fieldName: string): string {
   return identifier;
 }
 
+function getIndexQueue(indexPath: string): Promise<void> {
+  return indexUpdateQueues.get(indexPath) ?? Promise.resolve();
+}
+
+function queueIndexUpdate<T>(indexPath: string, task: () => Promise<T>): Promise<T> {
+  const previous = getIndexQueue(indexPath);
+  const run = previous.then(task, task);
+  indexUpdateQueues.set(
+    indexPath,
+    run.then(
+      () => undefined,
+      () => undefined
+    )
+  );
+  return run;
+}
+
 export interface LocalEvolutionStore {
   paths: MetabotPaths;
   ensureLayout(): Promise<MetabotPaths>;
@@ -156,21 +174,12 @@ export interface LocalEvolutionStore {
 
 export function createLocalEvolutionStore(homeDirOrPaths: string | MetabotPaths): LocalEvolutionStore {
   const paths = typeof homeDirOrPaths === 'string' ? resolveMetabotPaths(homeDirOrPaths) : homeDirOrPaths;
-  let updateQueue: Promise<void> = Promise.resolve();
-
-  function queueIndexUpdate<T>(task: () => Promise<T>): Promise<T> {
-    const run = updateQueue.then(task, task);
-    updateQueue = run.then(
-      () => undefined,
-      () => undefined
-    );
-    return run;
-  }
+  const indexQueueKey = path.resolve(paths.evolutionIndexPath);
 
   async function updateIndex(
     updater: (current: StoredSkillEvolutionIndex) => StoredSkillEvolutionIndex
   ): Promise<SkillEvolutionIndex> {
-    return queueIndexUpdate(async () => {
+    return queueIndexUpdate(indexQueueKey, async () => {
       await ensureEvolutionLayout(paths);
       const current = normalizeIndex(await readIndexFile(paths.evolutionIndexPath));
       const next = normalizeIndex(updater(current));
@@ -186,7 +195,7 @@ export function createLocalEvolutionStore(homeDirOrPaths: string | MetabotPaths)
       return paths;
     },
     async readIndex() {
-      await updateQueue;
+      await getIndexQueue(indexQueueKey);
       await ensureEvolutionLayout(paths);
       return normalizeIndex(await readIndexFile(paths.evolutionIndexPath));
     },
