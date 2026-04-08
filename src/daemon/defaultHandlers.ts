@@ -751,7 +751,16 @@ async function applyCallerForegroundTimeout(input: {
   sessionStateStore: ReturnType<typeof createSessionStateStore>;
   runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
   trace: SessionTraceRecord;
-}): Promise<{ trace: SessionTraceRecord; artifacts: Awaited<ReturnType<typeof exportSessionArtifacts>> }> {
+}): Promise<{
+  trace: SessionTraceRecord;
+  artifacts: Awaited<ReturnType<typeof exportSessionArtifacts>>;
+  mutation: {
+    session: A2ASessionRecord;
+    taskRun: A2ATaskRunRecord;
+    event: A2ASessionEngineEvent;
+    runnerResult: ProviderServiceRunnerResult | null;
+  };
+}> {
   const mutation = input.sessionEngine.markForegroundTimeout({
     session: input.session,
     taskRun: input.taskRun,
@@ -773,11 +782,17 @@ async function applyCallerForegroundTimeout(input: {
     },
   ]);
 
-  return rebuildCallerTraceArtifacts({
+  const rebuilt = await rebuildCallerTraceArtifacts({
     baseTrace: input.trace,
     runtimeStateStore: input.runtimeStateStore,
     sessionStateStore: input.sessionStateStore,
   });
+
+  return {
+    trace: rebuilt.trace,
+    artifacts: rebuilt.artifacts,
+    mutation,
+  };
 }
 
 export function createDefaultMetabotDaemonHandlers(input: {
@@ -1369,6 +1384,21 @@ export function createDefaultMetabotDaemonHandlers(input: {
             responsePublicStatus = 'completed';
             providerReplyText = reply.responseText;
             deliveryPinId = reply.deliveryPinId;
+          } else if (reply.state === 'timeout') {
+            const timedOut = await applyCallerForegroundTimeout({
+              session: started.session,
+              taskRun: started.taskRun,
+              sessionEngine,
+              sessionStateStore,
+              runtimeStateStore,
+              trace,
+            });
+            responseTrace = timedOut.trace;
+            responseArtifacts = timedOut.artifacts;
+            responseSession = timedOut.mutation.session;
+            responseTaskRun = timedOut.mutation.taskRun;
+            responseEvent = timedOut.mutation.event;
+            responsePublicStatus = 'timeout';
           }
         }
 

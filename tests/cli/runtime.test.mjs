@@ -417,9 +417,9 @@ test('services call stores a trace that trace get can read back from the local r
   assert.equal(called.payload.ok, true);
   assert.match(called.payload.data.traceId, /^trace-/);
   assert.equal(called.payload.data.session.role, 'caller');
-  assert.equal(called.payload.data.session.state, 'requesting_remote');
-  assert.equal(called.payload.data.session.publicStatus, 'requesting_remote');
-  assert.equal(called.payload.data.session.event, 'request_sent');
+  assert.equal(called.payload.data.session.state, 'timeout');
+  assert.equal(called.payload.data.session.publicStatus, 'timeout');
+  assert.equal(called.payload.data.session.event, 'timeout');
   assert.match(called.payload.data.session.externalConversationId, /^a2a-session:/);
   assert.equal(called.payload.data.confirmation.requiresConfirmation, true);
   assert.equal(called.payload.data.confirmation.policyMode, 'confirm_all');
@@ -442,6 +442,7 @@ test('services call stores a trace that trace get can read back from the local r
 
   const traceMarkdown = await readFile(called.payload.data.traceMarkdownPath, 'utf8');
   assert.match(traceMarkdown, /Weather Oracle/);
+  assert.match(traceMarkdown, /timeout/i);
 
   const sessionState = JSON.parse(
     await readFile(path.join(homeDir, '.metabot', 'hot', 'a2a-session-state.json'), 'utf8')
@@ -449,8 +450,8 @@ test('services call stores a trace that trace get can read back from the local r
   const callerSession = sessionState.sessions.find((entry) => entry.traceId === called.payload.data.traceId);
   const callerTaskRun = sessionState.taskRuns.find((entry) => entry.runId === called.payload.data.session.taskRunId);
   assert.equal(callerSession.role, 'caller');
-  assert.equal(callerSession.state, 'requesting_remote');
-  assert.equal(callerTaskRun.state, 'queued');
+  assert.equal(callerSession.state, 'timeout');
+  assert.equal(callerTaskRun.state, 'timeout');
 });
 
 test('services call returns an A2A start contract while provider execution flows through provider session state', async (t) => {
@@ -602,6 +603,61 @@ test('services call resolves a chain-discovered online service into a real MetaW
 
   const transcriptMarkdown = await readFile(called.payload.data.transcriptMarkdownPath, 'utf8');
   assert.match(transcriptMarkdown, /Tomorrow will be bright with a light wind/);
+});
+
+test('services call persists timeout state when a chain-discovered service does not reply during the foreground wait', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const chainApi = await startFakeChainApiServer();
+  t.after(async () => stopDaemon(homeDir));
+  t.after(async () => chainApi.close());
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const requestFile = path.join(homeDir, 'chain-timeout-request.json');
+  await writeFile(requestFile, JSON.stringify({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  }), 'utf8');
+
+  const called = await runCommand(
+    homeDir,
+    ['services', 'call', '--request-file', requestFile],
+    {
+      METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+      METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+      METABOT_TEST_FAKE_METAWEB_REPLY: JSON.stringify({
+        state: 'timeout',
+      }),
+    }
+  );
+
+  assert.equal(called.exitCode, 0);
+  assert.equal(called.payload.ok, true);
+  assert.equal(called.payload.data.session.role, 'caller');
+  assert.equal(called.payload.data.session.publicStatus, 'timeout');
+  assert.equal(called.payload.data.session.event, 'timeout');
+  assert.equal('responseText' in called.payload.data, false);
+
+  const trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', called.payload.data.traceId], {
+    METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+  });
+
+  assert.equal(trace.exitCode, 0);
+  assert.equal(trace.payload.ok, true);
+  assert.equal(trace.payload.data.a2a.publicStatus, 'timeout');
+  assert.equal(trace.payload.data.a2a.latestEvent, 'timeout');
+
+  const transcriptMarkdown = await readFile(called.payload.data.transcriptMarkdownPath, 'utf8');
+  assert.match(transcriptMarkdown, /Foreground timeout reached|Foreground wait ended before the remote MetaBot returned/i);
 });
 
 test('chat private encrypts a loopback message and stores a chat trace in the local runtime', async (t) => {

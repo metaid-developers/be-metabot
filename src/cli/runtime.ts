@@ -273,6 +273,7 @@ function createTestMetaWebReplyWaiter(env: NodeJS.ProcessEnv): MetaWebServiceRep
   }
 
   let parsed: {
+    state?: unknown;
     responseText?: unknown;
     deliveryPinId?: unknown;
     observedAt?: unknown;
@@ -293,6 +294,12 @@ function createTestMetaWebReplyWaiter(env: NodeJS.ProcessEnv): MetaWebServiceRep
         : 0;
       if (delayMs > 0) {
         await sleep(Math.min(delayMs, input.timeoutMs));
+      }
+
+      if (parsed.state === 'timeout') {
+        return {
+          state: 'timeout',
+        };
       }
 
       return {
