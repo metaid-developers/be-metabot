@@ -1,4 +1,6 @@
 import path from 'node:path';
+import type { PublicStatus } from '../a2a/publicStatus';
+import type { A2ASessionRole, A2ATaskRunState } from '../a2a/sessionTypes';
 
 export interface SessionTraceSessionInput {
   id: string;
@@ -27,12 +29,41 @@ export interface BuildSessionTraceInput {
   createdAt?: number;
   session: SessionTraceSessionInput;
   order?: SessionTraceOrderInput | null;
+  a2a?: SessionTraceA2AInput | null;
 }
 
 export interface SessionTraceArtifacts {
   transcriptMarkdownPath: string;
   traceMarkdownPath: string;
   traceJsonPath: string;
+}
+
+export interface SessionTraceA2AInput {
+  sessionId?: string | null;
+  taskRunId?: string | null;
+  role?: A2ASessionRole | string | null;
+  publicStatus?: PublicStatus | string | null;
+  latestEvent?: string | null;
+  taskRunState?: A2ATaskRunState | string | null;
+  callerGlobalMetaId?: string | null;
+  callerName?: string | null;
+  providerGlobalMetaId?: string | null;
+  providerName?: string | null;
+  servicePinId?: string | null;
+}
+
+export interface SessionTraceA2ARecord {
+  sessionId: string | null;
+  taskRunId: string | null;
+  role: string | null;
+  publicStatus: string | null;
+  latestEvent: string | null;
+  taskRunState: string | null;
+  callerGlobalMetaId: string | null;
+  callerName: string | null;
+  providerGlobalMetaId: string | null;
+  providerName: string | null;
+  servicePinId: string | null;
 }
 
 export interface SessionTraceRecord {
@@ -57,6 +88,7 @@ export interface SessionTraceRecord {
     paymentCurrency: string | null;
     paymentAmount: string | null;
   } | null;
+  a2a: SessionTraceA2ARecord | null;
   artifacts: SessionTraceArtifacts;
 }
 
@@ -91,6 +123,28 @@ function normalizeText(value: unknown): string {
 function sanitizePathSegment(value: string, fallback: string): string {
   const normalized = normalizeText(value).replace(/[^a-zA-Z0-9._-]+/g, '-');
   return normalized || fallback;
+}
+
+function buildA2ATraceRecord(input?: SessionTraceA2AInput | null): SessionTraceA2ARecord | null {
+  if (!input) {
+    return null;
+  }
+
+  const record: SessionTraceA2ARecord = {
+    sessionId: normalizeText(input.sessionId) || null,
+    taskRunId: normalizeText(input.taskRunId) || null,
+    role: normalizeText(input.role) || null,
+    publicStatus: normalizeText(input.publicStatus) || null,
+    latestEvent: normalizeText(input.latestEvent) || null,
+    taskRunState: normalizeText(input.taskRunState) || null,
+    callerGlobalMetaId: normalizeText(input.callerGlobalMetaId) || null,
+    callerName: normalizeText(input.callerName) || null,
+    providerGlobalMetaId: normalizeText(input.providerGlobalMetaId) || null,
+    providerName: normalizeText(input.providerName) || null,
+    servicePinId: normalizeText(input.servicePinId) || null,
+  };
+
+  return Object.values(record).some(Boolean) ? record : null;
 }
 
 export function buildServiceOrderObserverConversationId(
@@ -182,6 +236,7 @@ export function buildSessionTrace(input: BuildSessionTraceInput): SessionTraceRe
           paymentAmount: normalizeText(input.order.paymentAmount) || null,
         }
       : null,
+    a2a: buildA2ATraceRecord(input.a2a),
     artifacts: {
       transcriptMarkdownPath,
       traceMarkdownPath,
