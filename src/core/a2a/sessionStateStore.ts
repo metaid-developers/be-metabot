@@ -12,7 +12,7 @@ const MAX_TRANSCRIPT_ITEMS = 2_000;
 const MAX_PUBLIC_STATUS_SNAPSHOTS = 1_000;
 const LOCKFILE_BASE_DELAY_MS = 25;
 const LOCKFILE_MAX_ATTEMPTS = 200;
-const LOCKFILE_STALE_MS = 30_000;
+const LOCKFILE_STALE_MS = 5 * 60 * 1000;
 
 export type A2ATranscriptSender = 'caller' | 'provider' | 'system';
 export type A2ALoopCursor = string | number | null;
@@ -116,11 +116,18 @@ async function writeJsonFileAtomically(filePath: string, value: unknown): Promis
     await handle.close();
     handle = null;
     await fs.rename(tempPath, filePath);
-    const directoryHandle = await fs.open(path.dirname(filePath), 'r');
     try {
-      await directoryHandle.sync();
-    } finally {
-      await directoryHandle.close();
+      const directoryHandle = await fs.open(path.dirname(filePath), 'r');
+      try {
+        await directoryHandle.sync();
+      } finally {
+        await directoryHandle.close();
+      }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EINVAL' && code !== 'EPERM' && code !== 'ENOTSUP' && code !== 'EBADF') {
+        throw error;
+      }
     }
   } catch (error) {
     if (handle) {
@@ -135,6 +142,20 @@ async function sleep(ms: number): Promise<void> {
   await new Promise(resolve => {
     setTimeout(resolve, ms);
   });
+}
+
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code !== 'ESRCH';
+  }
 }
 
 async function withLock<T>(lockPath: string, operation: () => Promise<T>): Promise<T> {
@@ -158,8 +179,14 @@ async function withLock<T>(lockPath: string, operation: () => Promise<T>): Promi
         throw error;
       }
       try {
+        const lockInfo = await readJsonFile<{ pid?: unknown; acquiredAt?: unknown }>(lockPath);
         const stat = await fs.stat(lockPath);
-        if (Date.now() - stat.mtimeMs > LOCKFILE_STALE_MS) {
+        const lockPid = typeof lockInfo?.pid === 'number' ? lockInfo.pid : null;
+        const acquiredAt =
+          typeof lockInfo?.acquiredAt === 'number' ? lockInfo.acquiredAt : stat.mtimeMs;
+        const stale = Date.now() - acquiredAt > LOCKFILE_STALE_MS;
+        const ownerAlive = lockPid ? isProcessAlive(lockPid) : false;
+        if (stale && !ownerAlive) {
           await fs.rm(lockPath, { force: true });
           continue;
         }
@@ -281,11 +308,12 @@ export function createSessionStateStore(homeDirOrPaths: string | MetabotPaths): 
       if (!items.length) {
         return items;
       }
+      let persistedItems: A2ATranscriptItemRecord[] = [];
       await this.updateState(state => ({
         ...state,
         transcriptItems: (() => {
           const seenIds = new Set(state.transcriptItems.map(item => item.id));
-          const nextItems = [];
+          const nextItems: A2ATranscriptItemRecord[] = [];
           for (const item of items) {
             if (seenIds.has(item.id)) {
               continue;
@@ -293,15 +321,17 @@ export function createSessionStateStore(homeDirOrPaths: string | MetabotPaths): 
             seenIds.add(item.id);
             nextItems.push(item);
           }
+          persistedItems = nextItems;
           return [...state.transcriptItems, ...nextItems].slice(-MAX_TRANSCRIPT_ITEMS);
         })(),
       }));
-      return items;
+      return persistedItems;
     },
     async appendPublicStatusSnapshots(items) {
       if (!items.length) {
         return items;
       }
+      let persistedSnapshots: A2APublicStatusSnapshot[] = [];
       const snapshotKey = (snapshot: A2APublicStatusSnapshot): string =>
         JSON.stringify([
           snapshot.sessionId,
@@ -315,7 +345,7 @@ export function createSessionStateStore(homeDirOrPaths: string | MetabotPaths): 
         ...state,
         publicStatusSnapshots: (() => {
           const seenKeys = new Set(state.publicStatusSnapshots.map(snapshotKey));
-          const nextSnapshots = [];
+          const nextSnapshots: A2APublicStatusSnapshot[] = [];
           for (const snapshot of items) {
             const incomingKey = snapshotKey(snapshot);
             if (seenKeys.has(incomingKey)) {
@@ -324,11 +354,12 @@ export function createSessionStateStore(homeDirOrPaths: string | MetabotPaths): 
             seenKeys.add(incomingKey);
             nextSnapshots.push(snapshot);
           }
+          persistedSnapshots = nextSnapshots;
           return [...state.publicStatusSnapshots, ...nextSnapshots]
             .slice(-MAX_PUBLIC_STATUS_SNAPSHOTS);
         })(),
       }));
-      return items;
+      return persistedSnapshots;
     },
     async setLoopCursor(role, cursor) {
       await this.updateState(state => ({

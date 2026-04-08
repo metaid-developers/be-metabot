@@ -80,7 +80,7 @@ test('session state store appends transcript items and public status snapshots',
   const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-a2a-transcript-'));
   const store = createSessionStateStore(homeDir);
 
-  await store.appendTranscriptItems([
+  const firstAppend = await store.appendTranscriptItems([
     {
       id: 'tx-1',
       sessionId: 'session-1',
@@ -101,7 +101,9 @@ test('session state store appends transcript items and public status snapshots',
       metadata: null,
     },
   ]);
-  await store.appendPublicStatusSnapshots([
+  assert.equal(firstAppend.length, 2);
+
+  const firstSnapshots = await store.appendPublicStatusSnapshots([
     {
       sessionId: 'session-1',
       taskRunId: 'run-1',
@@ -111,6 +113,7 @@ test('session state store appends transcript items and public status snapshots',
       resolvedAt: 1_744_444_444_300,
     },
   ]);
+  assert.equal(firstSnapshots.length, 1);
 
   const state = await store.readState();
   assert.equal(state.transcriptItems.length, 2);
@@ -130,7 +133,7 @@ test('session state store appends transcript items and public status snapshots',
       metadata: null,
     },
   ]);
-  await store.appendTranscriptItems([
+  const dedupedTranscriptItems = await store.appendTranscriptItems([
     {
       id: 'tx-2',
       sessionId: 'session-1',
@@ -150,7 +153,20 @@ test('session state store appends transcript items and public status snapshots',
       metadata: null,
     },
   ]);
+  assert.equal(dedupedTranscriptItems.length, 0);
   assert.equal((await store.readState()).transcriptItems.length, 2);
+
+  const dedupedSnapshots = await store.appendPublicStatusSnapshots([
+    {
+      sessionId: 'session-1',
+      taskRunId: 'run-1',
+      status: 'remote_executing',
+      mapped: true,
+      rawEvent: 'provider_executing',
+      resolvedAt: 1_744_444_444_300,
+    },
+  ]);
+  assert.equal(dedupedSnapshots.length, 0);
 });
 
 test('session state store does not mutate runtime-state identity/services/traces storage', async () => {
