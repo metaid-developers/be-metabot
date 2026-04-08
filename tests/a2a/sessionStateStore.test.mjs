@@ -288,7 +288,7 @@ test('session state store recovers from a stale lock owned by a dead process', a
 
   await store.ensureLayout();
   const lockPath = `${store.sessionStatePath}.lock`;
-  writeFileSync(lockPath, JSON.stringify({ pid: 999999, acquiredAt: Date.now() - (10 * 60 * 1000) }), 'utf8');
+  writeFileSync(lockPath, JSON.stringify({ pid: -1, acquiredAt: Date.now() - (10 * 60 * 1000) }), 'utf8');
   const staleTimestamp = (Date.now() - (10 * 60 * 1000)) / 1000;
   utimesSync(lockPath, staleTimestamp, staleTimestamp);
 
@@ -330,4 +330,29 @@ test('session state store caps transcript and public status history in hot stora
   assert.equal(state.transcriptItems[0].id, 'tx-5');
   assert.equal(state.publicStatusSnapshots.length, 1_000);
   assert.equal(state.publicStatusSnapshots[0].rawEvent, 'provider_executing_5');
+
+  const persistedTranscriptItems = await store.appendTranscriptItems(
+    Array.from({ length: 2_005 }, (_, index) => ({
+      id: `tx-overflow-${index}`,
+      sessionId: 'session-1',
+      timestamp: 1_744_444_446_000 + index,
+      type: 'message',
+      sender: 'caller',
+      content: `overflow-${index}`,
+      metadata: null,
+    }))
+  );
+  const persistedSnapshots = await store.appendPublicStatusSnapshots(
+    Array.from({ length: 1_005 }, (_, index) => ({
+      sessionId: 'session-1',
+      taskRunId: 'run-1',
+      status: 'remote_executing',
+      mapped: true,
+      rawEvent: `provider_overflow_${index}`,
+      resolvedAt: 1_744_444_447_000 + index,
+    }))
+  );
+
+  assert.equal(persistedTranscriptItems.length, 2_000);
+  assert.equal(persistedSnapshots.length, 1_000);
 });

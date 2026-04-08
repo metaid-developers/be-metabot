@@ -197,9 +197,13 @@ async function withLock<T>(lockPath: string, operation: () => Promise<T>): Promi
         const lockPid = typeof lockInfo?.pid === 'number' ? lockInfo.pid : null;
         const acquiredAt =
           typeof lockInfo?.acquiredAt === 'number' ? lockInfo.acquiredAt : stat.mtimeMs;
-        const stale = Date.now() - acquiredAt > LOCKFILE_STALE_MS;
         const ownerAlive = lockPid ? isProcessAlive(lockPid) : false;
-        if (stale && !ownerAlive) {
+        if (lockPid && !ownerAlive) {
+          await fs.rm(lockPath, { force: true });
+          continue;
+        }
+        const stale = Date.now() - acquiredAt > LOCKFILE_STALE_MS;
+        if (stale && !lockPid) {
           await fs.rm(lockPath, { force: true });
           continue;
         }
@@ -334,8 +338,10 @@ export function createSessionStateStore(homeDirOrPaths: string | MetabotPaths): 
             seenIds.add(item.id);
             nextItems.push(item);
           }
-          persistedItems = nextItems;
-          return [...state.transcriptItems, ...nextItems].slice(-MAX_TRANSCRIPT_ITEMS);
+          const nextStateItems = [...state.transcriptItems, ...nextItems].slice(-MAX_TRANSCRIPT_ITEMS);
+          const persistedIds = new Set(nextStateItems.map(item => item.id));
+          persistedItems = nextItems.filter(item => persistedIds.has(item.id));
+          return nextStateItems;
         })(),
       }));
       return persistedItems;
@@ -367,9 +373,13 @@ export function createSessionStateStore(homeDirOrPaths: string | MetabotPaths): 
             seenKeys.add(incomingKey);
             nextSnapshots.push(snapshot);
           }
-          persistedSnapshots = nextSnapshots;
-          return [...state.publicStatusSnapshots, ...nextSnapshots]
+          const nextStateSnapshots = [...state.publicStatusSnapshots, ...nextSnapshots]
             .slice(-MAX_PUBLIC_STATUS_SNAPSHOTS);
+          const persistedKeys = new Set(nextStateSnapshots.map(snapshotKey));
+          persistedSnapshots = nextSnapshots.filter(
+            snapshot => persistedKeys.has(snapshotKey(snapshot)),
+          );
+          return nextStateSnapshots;
         })(),
       }));
       return persistedSnapshots;
