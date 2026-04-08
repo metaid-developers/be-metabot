@@ -24,7 +24,7 @@ function buildFixPatch(classification: NetworkDirectoryExecutionClassification):
   if (classification.failureClass === 'manual_recovery') {
     return {
       instructionsPatch: 'Prefer machine-first service discovery and only use UI fallback when a human explicitly asks.',
-      fallbackPolicyPatch: 'Do not open UI by default. Use `metabot ui open --page hub` only after explicit human intent.',
+      fallbackPolicyPatch: 'Do not open UI by default; only use UI fallback after explicit human intent.',
     };
   }
   if (classification.failureClass === 'soft_failure') {
@@ -46,6 +46,8 @@ export function generateNetworkDirectoryFixCandidate(
   input: GenerateNetworkDirectoryFixCandidateInput
 ): SkillVariantArtifact {
   const variantId = `variant-network-directory-fix-${input.analysisId}-${input.execution.executionId}`;
+  const parentVariantId = input.execution.activeVariantId;
+  const rootVariantId = parentVariantId ?? variantId;
   const patch = buildFixPatch(input.classification);
   const scope = cloneScope(input.baseContract.scope);
 
@@ -62,8 +64,8 @@ export function generateNetworkDirectoryFixCandidate(
     patch,
     lineage: {
       lineageId: `lineage-${variantId}`,
-      parentVariantId: input.execution.activeVariantId,
-      rootVariantId: variantId,
+      parentVariantId,
+      rootVariantId,
       executionId: input.execution.executionId,
       analysisId: input.analysisId,
       createdAt: input.now,

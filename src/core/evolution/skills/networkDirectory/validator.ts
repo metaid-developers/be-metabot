@@ -18,6 +18,10 @@ export interface ValidateNetworkDirectoryFixCandidateInput {
   replayRepairAttemptCount?: number;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
 function normalizeAllowedCommands(commands: string[]): string[] {
   return [...new Set(commands)].sort();
 }
@@ -39,9 +43,17 @@ function areScopesEquivalent(left: SkillPermissionScope, right: SkillPermissionS
     && left.remoteDelegation === right.remoteDelegation;
 }
 
-function hasAllowedPatchSurfaceOnly(patch: SkillContractPatch): boolean {
-  for (const key of Object.keys(patch)) {
+function hasAllowedPatchSurfaceOnly(patch: unknown): patch is SkillContractPatch {
+  if (!isRecord(patch)) {
+    return false;
+  }
+  const keys = Object.keys(patch);
+  for (const key of keys) {
     if (!ALLOWED_PATCH_KEYS.has(key)) {
+      return false;
+    }
+    const value = patch[key];
+    if (typeof value !== 'string') {
       return false;
     }
   }
@@ -95,11 +107,10 @@ function isReplayValid(
   if (replayClassification.failureClass === triggerFailureClass) {
     return false;
   }
-  if (triggerFailureClass === 'manual_recovery') {
-    return replayClassification.failureClass !== 'manual_recovery';
+  if (triggerFailureClass === 'hard_failure' || triggerFailureClass === 'soft_failure') {
+    return replayClassification.failureClass === null;
   }
-  return replayClassification.failureClass !== 'hard_failure'
-    && replayClassification.failureClass !== 'soft_failure';
+  return replayClassification.failureClass !== 'manual_recovery';
 }
 
 export function validateNetworkDirectoryFixCandidate(

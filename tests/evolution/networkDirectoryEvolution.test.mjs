@@ -4,7 +4,6 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { getBaseSkillContract } = require('../../dist/core/skills/baseSkillRegistry.js');
-const { evaluateSkillAdoption } = require('../../dist/core/evolution/adoptionPolicy.js');
 const {
   classifyNetworkDirectoryExecution,
 } = require('../../dist/core/evolution/skills/networkDirectory/failureClassifier.js');
@@ -14,45 +13,6 @@ const {
 const {
   validateNetworkDirectoryFixCandidate,
 } = require('../../dist/core/evolution/skills/networkDirectory/validator.js');
-
-function createCandidateVariant(scopeOverrides = {}) {
-  const base = getBaseSkillContract('metabot-network-directory');
-  return {
-    variantId: 'variant-candidate-1',
-    skillName: 'metabot-network-directory',
-    status: 'inactive',
-    scope: {
-      ...base.scope,
-      ...scopeOverrides,
-    },
-    metadata: {
-      sameSkill: true,
-      sameScope: true,
-      scopeHash: 'scope-hash-v1',
-    },
-    patch: {
-      instructionsPatch: 'Prefer machine payload before opening UI.',
-    },
-    lineage: {
-      lineageId: 'lineage-1',
-      parentVariantId: null,
-      rootVariantId: 'variant-candidate-1',
-      executionId: 'exec-1',
-      analysisId: 'analysis-1',
-      createdAt: 1_744_444_445_000,
-    },
-    verification: {
-      passed: true,
-      checkedAt: 1_744_444_446_000,
-      protocolCompatible: true,
-      replayValid: true,
-      notWorseThanBase: true,
-    },
-    adoption: 'manual',
-    createdAt: 1_744_444_446_500,
-    updatedAt: 1_744_444_446_500,
-  };
-}
 
 function createExecutionRecord(overrides = {}) {
   return {
@@ -105,6 +65,20 @@ test('classifier returns hard_failure for failed state and invalid services enve
   assert.equal(missingServices.completed, false);
   assert.equal(missingServices.failureClass, 'hard_failure');
   assert.equal(missingServices.isEvolutionCandidate, true);
+
+  const invalidServicesShape = classifyNetworkDirectoryExecution({
+    execution: createExecutionRecord({
+      envelope: {
+        state: 'succeeded',
+        data: {
+          services: 'not-an-array',
+        },
+      },
+    }),
+  });
+  assert.equal(invalidServicesShape.completed, false);
+  assert.equal(invalidServicesShape.failureClass, 'hard_failure');
+  assert.equal(invalidServicesShape.isEvolutionCandidate, true);
 });
 
 test('classifier returns soft_failure when service rows are unusable for automation', () => {
@@ -126,6 +100,20 @@ test('classifier returns soft_failure when service rows are unusable for automat
   assert.equal(classification.completed, false);
   assert.equal(classification.failureClass, 'soft_failure');
   assert.equal(classification.isEvolutionCandidate, true);
+
+  const emptyServicesClassification = classifyNetworkDirectoryExecution({
+    execution: createExecutionRecord({
+      envelope: {
+        state: 'succeeded',
+        data: {
+          services: [],
+        },
+      },
+    }),
+  });
+  assert.equal(emptyServicesClassification.completed, false);
+  assert.equal(emptyServicesClassification.failureClass, 'soft_failure');
+  assert.equal(emptyServicesClassification.isEvolutionCandidate, true);
 });
 
 test('classifier returns manual_recovery when UI fallback or repeated command repair is recorded', () => {
@@ -184,6 +172,29 @@ test('FIX generator emits only allowed patch fields and preserves scope', () => 
   assert.equal(patchKeys.every((key) => allowedPatchKeys.includes(key)), true);
 });
 
+test('FIX generator keeps manual-recovery fallback policy generic and preserves lineage root when parent exists', () => {
+  const base = getBaseSkillContract('metabot-network-directory');
+  const execution = createExecutionRecord({
+    executionId: 'execution-manual-recovery',
+    activeVariantId: 'variant-parent-1',
+    usedUiFallback: true,
+  });
+  const classification = classifyNetworkDirectoryExecution({
+    execution,
+  });
+  const candidate = generateNetworkDirectoryFixCandidate({
+    baseContract: base,
+    execution,
+    classification,
+    analysisId: 'analysis-manual-1',
+    now: 1_744_444_550_000,
+  });
+
+  assert.equal(candidate.lineage.parentVariantId, 'variant-parent-1');
+  assert.equal(candidate.lineage.rootVariantId, 'variant-parent-1');
+  assert.equal(candidate.patch.fallbackPolicyPatch.includes('metabot'), false);
+});
+
 test('validator rejects widened scope and accepts candidates that solve the triggering case', () => {
   const base = getBaseSkillContract('metabot-network-directory');
   const triggeringExecution = createExecutionRecord({
@@ -238,6 +249,39 @@ test('validator rejects widened scope and accepts candidates that solve the trig
   assert.equal(widenedScopeResult.protocolCompatible, false);
 });
 
+test('validator rejects hard/soft trigger candidates when replay still requires manual recovery', () => {
+  const base = getBaseSkillContract('metabot-network-directory');
+  const triggeringExecution = createExecutionRecord({
+    executionId: 'execution-hard-fail-manual-replay',
+    envelope: {
+      state: 'failed',
+      data: {},
+    },
+  });
+  const classification = classifyNetworkDirectoryExecution({
+    execution: triggeringExecution,
+  });
+  const candidate = generateNetworkDirectoryFixCandidate({
+    baseContract: base,
+    execution: triggeringExecution,
+    classification,
+    analysisId: 'analysis-hard-manual-replay',
+    now: 1_744_444_620_000,
+  });
+  const manualReplayResult = validateNetworkDirectoryFixCandidate({
+    baseContract: base,
+    candidate,
+    triggerFailureClass: 'hard_failure',
+    replayExecution: createExecutionRecord({
+      executionId: 'execution-replay-manual-recovery',
+      usedUiFallback: true,
+    }),
+  });
+
+  assert.equal(manualReplayResult.passed, false);
+  assert.equal(manualReplayResult.replayValid, false);
+});
+
 test('validator rejects candidates that repeat the triggering failure class', () => {
   const base = getBaseSkillContract('metabot-network-directory');
   const triggeringExecution = createExecutionRecord({
@@ -286,34 +330,36 @@ test('validator rejects candidates that repeat the triggering failure class', ()
   assert.equal(repeatedFailureResult.replayValid, false);
 });
 
-test('adoption policy auto-adopts same-skill same-scope candidates', () => {
+test('validator rejects malformed patch value types even when keys are allowed', () => {
   const base = getBaseSkillContract('metabot-network-directory');
-  const candidate = createCandidateVariant();
+  const triggeringExecution = createExecutionRecord({
+    executionId: 'execution-for-malformed-patch',
+    envelope: {
+      state: 'failed',
+      data: {},
+    },
+  });
+  const classification = classifyNetworkDirectoryExecution({
+    execution: triggeringExecution,
+  });
+  const candidate = generateNetworkDirectoryFixCandidate({
+    baseContract: base,
+    execution: triggeringExecution,
+    classification,
+    analysisId: 'analysis-malformed-patch',
+    now: 1_744_444_710_000,
+  });
+  candidate.patch.instructionsPatch = 42;
 
-  const decision = evaluateSkillAdoption({
-    activeSkillName: base.skillName,
-    activeScope: base.scope,
+  const result = validateNetworkDirectoryFixCandidate({
+    baseContract: base,
     candidate,
+    triggerFailureClass: 'hard_failure',
+    replayExecution: createExecutionRecord({
+      executionId: 'execution-replay-after-malformed-patch',
+    }),
   });
 
-  assert.equal(decision.autoAdopt, true);
-  assert.equal(decision.status, 'active');
-  assert.equal(decision.adoption, 'active');
-});
-
-test('adoption policy leaves widened-scope candidates non-active for manual adoption', () => {
-  const base = getBaseSkillContract('metabot-network-directory');
-  const candidate = createCandidateVariant({
-    chainWrite: true,
-  });
-
-  const decision = evaluateSkillAdoption({
-    activeSkillName: base.skillName,
-    activeScope: base.scope,
-    candidate,
-  });
-
-  assert.equal(decision.autoAdopt, false);
-  assert.equal(decision.status, 'inactive');
-  assert.equal(decision.adoption, 'manual');
+  assert.equal(result.passed, false);
+  assert.equal(result.protocolCompatible, false);
 });

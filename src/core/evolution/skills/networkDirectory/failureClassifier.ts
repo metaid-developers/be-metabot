@@ -65,8 +65,11 @@ function classifyHardFailure(execution: SkillExecutionRecord): string | null {
 
 function classifySoftFailure(envelope: Record<string, unknown>): string | null {
   const services = getServices(envelope);
-  if (!services || services.length === 0) {
+  if (!services) {
     return null;
+  }
+  if (services.length === 0) {
+    return 'Services list is empty and unusable for downstream automation.';
   }
   const usableRows = services.filter((row) => isUsableServiceRow(row));
   if (usableRows.length === 0) {
