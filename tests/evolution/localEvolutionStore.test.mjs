@@ -142,6 +142,24 @@ test('local evolution store keeps deterministic, append-safe index updates and a
   assert.equal(index.activeVariants['metabot-network-directory'], newerArtifact.variantId);
 });
 
+test('local evolution store clears one active variant through the shared index update queue', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+  const store = createLocalEvolutionStore(homeDir);
+
+  await Promise.all([
+    store.writeExecution(createExecutionRecord()),
+    store.setActiveVariant('metabot-network-directory', 'variant-keep'),
+    store.setActiveVariant('metabot-trace-inspector', 'variant-remove'),
+  ]);
+
+  await store.clearActiveVariant('metabot-trace-inspector');
+
+  const index = await store.readIndex();
+  assert.deepEqual(index.executions, ['exec-1']);
+  assert.equal(index.activeVariants['metabot-network-directory'], 'variant-keep');
+  assert.equal(index.activeVariants['metabot-trace-inspector'], undefined);
+});
+
 test('local evolution store rejects unsafe identifiers used for filesystem paths', async () => {
   const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
   const store = createLocalEvolutionStore(homeDir);

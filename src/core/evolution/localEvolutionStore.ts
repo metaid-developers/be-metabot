@@ -170,6 +170,7 @@ export interface LocalEvolutionStore {
   writeAnalysis(record: SkillExecutionAnalysis): Promise<string>;
   writeArtifact(record: SkillVariantArtifact): Promise<string>;
   setActiveVariant(skillName: string, variantId: string): Promise<SkillEvolutionIndex>;
+  clearActiveVariant(skillName: string): Promise<SkillEvolutionIndex>;
 }
 
 export function createLocalEvolutionStore(homeDirOrPaths: string | MetabotPaths): LocalEvolutionStore {
@@ -242,6 +243,17 @@ export function createLocalEvolutionStore(homeDirOrPaths: string | MetabotPaths)
           [safeSkillName]: safeVariantId,
         }),
       }));
+    },
+    async clearActiveVariant(skillName) {
+      const safeSkillName = validateIdentifier(skillName, 'skillName');
+      return updateIndex((current) => {
+        const activeVariants = { ...current.activeVariants };
+        delete activeVariants[safeSkillName];
+        return {
+          ...current,
+          activeVariants: normalizeActiveVariants(activeVariants),
+        };
+      });
     },
   };
 }

@@ -436,8 +436,7 @@ async function clearActiveVariantMapping(
   skillName: string,
 ): Promise<{ removed: boolean; previousVariantId: string | null }> {
   const homeDir = normalizeHomeDir(context.env, context.cwd);
-  const paths = resolveMetabotPaths(homeDir);
-  const evolutionStore = createLocalEvolutionStore(paths);
+  const evolutionStore = createLocalEvolutionStore(homeDir);
   const index = await evolutionStore.readIndex();
   const previousVariantId = index.activeVariants[skillName] ?? null;
   if (!previousVariantId) {
@@ -447,15 +446,7 @@ async function clearActiveVariantMapping(
     };
   }
 
-  const activeVariants = { ...index.activeVariants };
-  delete activeVariants[skillName];
-  const nextIndex = {
-    ...index,
-    activeVariants,
-  };
-
-  await fs.promises.mkdir(path.dirname(paths.evolutionIndexPath), { recursive: true });
-  await fs.promises.writeFile(paths.evolutionIndexPath, `${JSON.stringify(nextIndex, null, 2)}\n`, 'utf8');
+  await evolutionStore.clearActiveVariant(skillName);
 
   return {
     removed: true,
