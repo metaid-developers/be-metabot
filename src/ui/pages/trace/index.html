@@ -153,12 +153,20 @@
         font-size: 1.05rem;
       }
       .detail-grid {
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        grid-template-columns: repeat(12, minmax(0, 1fr));
       }
       .detail-card {
         padding: 20px;
         display: grid;
         gap: 14px;
+        min-width: 0;
+        grid-column: span 4;
+      }
+      .detail-card-wide {
+        grid-column: span 6;
+      }
+      .detail-card-full {
+        grid-column: 1 / -1;
       }
       .detail-card h2,
       .panel h2 {
@@ -184,6 +192,7 @@
         margin: 0;
         font-size: 0.98rem;
         word-break: break-word;
+        overflow-wrap: anywhere;
       }
       .timeline-list {
         list-style: none;
@@ -197,17 +206,23 @@
         border-radius: 18px;
         border: 1px solid var(--line);
         background: var(--card-strong);
+        min-width: 0;
       }
       .timeline-item strong {
         display: block;
         margin-bottom: 8px;
         font-size: 0.9rem;
+        overflow-wrap: anywhere;
       }
       .timeline-item p {
         margin: 0;
         color: var(--muted);
         line-height: 1.6;
         white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .participant-item {
+        min-width: 0;
       }
       .tone-active { border-color: rgba(15, 118, 110, 0.25); }
       .tone-timeout { border-color: rgba(180, 83, 9, 0.25); background: rgba(180, 83, 9, 0.05); }
@@ -268,6 +283,20 @@
         .hero {
           padding: 22px;
         }
+        .detail-card,
+        .detail-card-wide,
+        .detail-card-full {
+          grid-column: 1 / -1;
+        }
+      }
+      @media (max-width: 1040px) {
+        .detail-card {
+          grid-column: span 6;
+        }
+        .detail-card-wide,
+        .detail-card-full {
+          grid-column: 1 / -1;
+        }
       }
     </style>
   </head>
@@ -313,7 +342,7 @@
           <dl class="definition-list" data-trace-snapshot></dl>
         </article>
 
-        <article class="detail-card">
+        <article class="detail-card detail-card-wide">
           <h2>Participants</h2>
           <p class="detail-copy">Keep the subject as MetaBot-to-MetaBot, not endpoint-to-endpoint.</p>
           <ul class="timeline-list" data-trace-participants></ul>
@@ -346,7 +375,7 @@
       </section>
 
       <section class="detail-grid">
-        <article class="detail-card">
+        <article class="detail-card detail-card-wide">
           <h2>Remote Result</h2>
           <p class="detail-copy" data-trace-result-summary>
             When the remote MetaBot completes, show the verbatim returned result here instead of forcing humans to inspect raw exports first.
@@ -365,7 +394,7 @@
           <dl class="definition-list" data-trace-rating-meta></dl>
         </article>
 
-        <article class="detail-card">
+        <article class="detail-card detail-card-wide">
           <h2>Transcript Timeline</h2>
           <p class="detail-copy">If session-level transcript records exist, show them in order. Otherwise fall back to exported markdown.</p>
           <div data-trace-transcript></div>
@@ -380,7 +409,7 @@
       </section>
 
       <section class="detail-grid">
-        <article class="detail-card">
+        <article class="detail-card detail-card-full">
           <h2>Observation Notes</h2>
           <p class="detail-copy">This inspector is for humans. The actual task execution, payment, and MetaWeb exchange remain in the daemon and on-chain records.</p>
         </article>

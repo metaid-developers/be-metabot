@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import net from 'node:net';
 import { commandFailed, commandSuccess, type MetabotCommandResult } from '../core/contracts/commandResult';
 import { resolveMetabotPaths } from '../core/state/paths';
 import {
@@ -22,6 +23,7 @@ const DEFAULT_DAEMON_BASE_URL = 'http://127.0.0.1:4827';
 const DEFAULT_DAEMON_HOST = '127.0.0.1';
 const DEFAULT_DAEMON_START_TIMEOUT_MS = 5_000;
 const DAEMON_START_POLL_INTERVAL_MS = 100;
+const DAEMON_PREFERRED_PORT_ENV = 'METABOT_DAEMON_PREFERRED_PORT';
 const TEST_FAKE_CHAIN_WRITE_ENV = 'METABOT_TEST_FAKE_CHAIN_WRITE';
 const TEST_FAKE_SUBSIDY_ENV = 'METABOT_TEST_FAKE_SUBSIDY';
 const TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV = 'METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY';
@@ -36,6 +38,36 @@ function normalizeBaseUrl(value: string | undefined): string {
 
 function normalizeEnvText(value: string | null | undefined): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function parseDaemonPort(value: string | undefined): number | null {
+  const parsed = Number.parseInt(normalizeEnvText(value), 10);
+  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 65535) {
+    return null;
+  }
+  return parsed;
+}
+
+function getDefaultDaemonPort(): number {
+  try {
+    const parsed = new URL(DEFAULT_DAEMON_BASE_URL);
+    const port = Number.parseInt(parsed.port, 10);
+    if (Number.isInteger(port) && port > 0) {
+      return port;
+    }
+  } catch {
+    // Ignore malformed defaults and fall back below.
+  }
+  return 4827;
+}
+
+function isAddressInUseError(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === 'object'
+    && 'code' in error
+    && (error as NodeJS.ErrnoException).code === 'EADDRINUSE'
+  );
 }
 
 function collectRuntimeFingerprintEntries(rootDir: string, directory: string, entries: string[]): void {
@@ -113,6 +145,34 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function isPortBindable(host: string, port: number): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const probe = net.createServer();
+    const finalize = (result: boolean) => {
+      probe.removeAllListeners();
+      resolve(result);
+    };
+    probe.once('error', () => finalize(false));
+    probe.listen(port, host, () => {
+      probe.close(() => finalize(true));
+    });
+  });
+}
+
+async function waitForPortRelease(host: string, port: number, timeoutMs: number): Promise<void> {
+  if (!Number.isInteger(port) || port <= 0) {
+    return;
+  }
+
+  const startedAt = Date.now();
+  while ((Date.now() - startedAt) < timeoutMs) {
+    if (await isPortBindable(host, port)) {
+      return;
+    }
+    await sleep(DAEMON_START_POLL_INTERVAL_MS);
+  }
+}
+
 async function isDaemonReachable(baseUrl: string): Promise<boolean> {
   try {
     const response = await fetch(`${baseUrl}/api/daemon/status`);
@@ -156,6 +216,8 @@ async function stopRunningDaemon(daemonRecord: RuntimeDaemonRecord): Promise<voi
   const startedAt = Date.now();
   while ((Date.now() - startedAt) < DAEMON_CONFIG_RESTART_TIMEOUT_MS) {
     if (!await isDaemonReachable(daemonRecord.baseUrl)) {
+      await waitForPortRelease(daemonRecord.host || DEFAULT_DAEMON_HOST, daemonRecord.port, DAEMON_CONFIG_RESTART_TIMEOUT_MS)
+        .catch(() => {});
       return;
     }
     await sleep(DAEMON_START_POLL_INTERVAL_MS);
@@ -178,21 +240,26 @@ async function ensureDaemonBaseUrl(context: CliRuntimeContext): Promise<string> 
       return daemonRecord.baseUrl;
     }
     await stopRunningDaemon(daemonRecord);
+    return startDetachedDaemon(context, daemonRecord);
   }
 
   return startDetachedDaemon(context);
 }
 
-async function startDetachedDaemon(context: CliRuntimeContext): Promise<string> {
+async function startDetachedDaemon(
+  context: CliRuntimeContext,
+  preferredRecord?: RuntimeDaemonRecord | null,
+): Promise<string> {
   const homeDir = normalizeHomeDir(context.env, context.cwd);
   const store = createRuntimeStateStore(homeDir);
   const expectedConfigHash = buildDaemonConfigHash(context.env);
-  const staleRecord = await store.readDaemon();
-  if (staleRecord?.baseUrl && await isDaemonReachable(staleRecord.baseUrl)) {
-    if (daemonConfigMatchesContext(staleRecord, context)) {
-      return staleRecord.baseUrl;
+  const persistedRecord = await store.readDaemon();
+  const staleRecord = persistedRecord ?? preferredRecord ?? null;
+  if (persistedRecord?.baseUrl && await isDaemonReachable(persistedRecord.baseUrl)) {
+    if (daemonConfigMatchesContext(persistedRecord, context)) {
+      return persistedRecord.baseUrl;
     }
-    await stopRunningDaemon(staleRecord);
+    await stopRunningDaemon(persistedRecord);
   }
   await store.clearDaemon();
 
@@ -207,6 +274,11 @@ async function startDetachedDaemon(context: CliRuntimeContext): Promise<string> 
         ...context.env,
         HOME: homeDir,
         METABOT_HOME: homeDir,
+        [DAEMON_PREFERRED_PORT_ENV]: String(
+          parseDaemonPort(context.env[DAEMON_PREFERRED_PORT_ENV])
+          ?? staleRecord?.port
+          ?? getDefaultDaemonPort()
+        ),
       },
     }
   );
@@ -499,8 +571,19 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   });
 
   const host = DEFAULT_DAEMON_HOST;
-  const port = Number.parseInt(context.env.METABOT_DAEMON_PORT || '', 10) || 0;
-  const started = await daemon.start(port, host);
+  const explicitPort = parseDaemonPort(context.env.METABOT_DAEMON_PORT);
+  const preferredPort = explicitPort
+    ?? parseDaemonPort(context.env[DAEMON_PREFERRED_PORT_ENV])
+    ?? getDefaultDaemonPort();
+  let started;
+  try {
+    started = await daemon.start(preferredPort, host);
+  } catch (error) {
+    if (explicitPort != null || !isAddressInUseError(error)) {
+      throw error;
+    }
+    started = await daemon.start(0, host);
+  }
 
   const runtimeStore = createRuntimeStateStore(paths);
   daemonRecord = await runtimeStore.writeDaemon({

@@ -92,6 +92,111 @@
         gap: 18px;
         margin-top: 24px;
       }
+      .directory-shell {
+        margin-top: 24px;
+        padding: 22px;
+        border: 1px solid var(--line);
+        border-radius: 26px;
+        background: rgba(255, 253, 248, 0.92);
+        box-shadow: 0 20px 55px rgba(78, 68, 45, 0.08);
+      }
+      .directory-header {
+        display: grid;
+        gap: 10px;
+        margin-bottom: 18px;
+      }
+      .directory-header h2 {
+        margin: 0;
+        font-size: 1.3rem;
+      }
+      .directory-header p,
+      .directory-updated,
+      .service-capability,
+      .service-description,
+      .directory-empty p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.7;
+      }
+      .directory-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 16px;
+      }
+      .service-card,
+      .directory-empty {
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        background: var(--card);
+        padding: 18px;
+      }
+      .service-card-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .service-card-title {
+        min-width: 0;
+        display: grid;
+        gap: 6px;
+      }
+      .service-card-title h2 {
+        margin: 0;
+        font-size: 1.1rem;
+        overflow-wrap: anywhere;
+      }
+      .service-status {
+        display: inline-flex;
+        align-items: center;
+        width: fit-content;
+        padding: 7px 10px;
+        border-radius: 999px;
+        font-size: 0.74rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        border: 1px solid var(--line);
+        white-space: nowrap;
+      }
+      .service-status-online {
+        color: var(--accent);
+        background: var(--accent-soft);
+      }
+      .service-status-recent {
+        color: #9a6700;
+        background: rgba(154, 103, 0, 0.12);
+      }
+      .service-status-offline {
+        color: var(--muted);
+        background: rgba(109, 101, 87, 0.08);
+      }
+      .service-meta {
+        margin: 14px 0 0;
+        display: grid;
+        gap: 10px;
+      }
+      .service-meta-row {
+        display: grid;
+        gap: 4px;
+      }
+      .service-meta-row dt {
+        font-size: 0.74rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .service-meta-row dd {
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+      .directory-empty {
+        display: grid;
+        gap: 8px;
+      }
+      .directory-empty h3 {
+        margin: 0;
+        font-size: 1.05rem;
+      }
       .panel {
         border: 1px solid var(--line);
         border-radius: 22px;
@@ -127,17 +232,30 @@
             <span>Online services detected</span>
           </div>
           <div class="hero-chip">
-            <strong data-trace-id>trace-ready</strong>
-            <span>Latest visible trace</span>
+            <strong data-top-service>loading...</strong>
+            <span>Top listed service</span>
           </div>
           <div class="hero-chip">
-            <strong data-order-id>order-ready</strong>
-            <span>Manual refund focus</span>
+            <strong data-directory-mode>yellow pages</strong>
+            <span>Directory mode</span>
           </div>
         </div>
         <nav class="nav">__PAGE_NAV__</nav>
       </section>
       <section class="panels">__PAGE_PANELS__</section>
+      <section class="directory-shell" data-service-directory>
+        <div class="directory-header">
+          <div class="eyebrow">Yellow Pages Directory</div>
+          <h2>Live online MetaBot services</h2>
+          <p>Humans browse here, then local MetaBots decide who to call over MetaWeb. The list stays local, but the service records come from the daemon’s real network read path.</p>
+          <p class="directory-updated" data-directory-updated>Waiting for the first directory refresh.</p>
+        </div>
+        <div class="directory-empty" data-directory-empty hidden>
+          <h3 data-directory-empty-title>No online MetaBot services yet</h3>
+          <p data-directory-empty-body>The local yellow pages has no visible services right now.</p>
+        </div>
+        <section class="directory-list" data-service-list></section>
+      </section>
     </main>
     <script>__PAGE_SCRIPT__</script>
   </body>

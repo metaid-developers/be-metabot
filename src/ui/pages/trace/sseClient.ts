@@ -63,10 +63,13 @@ export function buildTraceInspectorScript(): string {
     target.appendChild(row);
   };
 
-  const appendListItem = (target, title, body, tone) => {
+  const appendListItem = (target, title, body, tone, extraClass) => {
     if (!target) return;
     const item = document.createElement('li');
     item.className = tone ? 'timeline-item tone-' + tone : 'timeline-item';
+    if (extraClass) {
+      item.className += ' ' + extraClass;
+    }
     const strong = document.createElement('strong');
     strong.textContent = title;
     const paragraph = document.createElement('p');
@@ -180,27 +183,46 @@ export function buildTraceInspectorScript(): string {
     appendDefinitionRow(elements.snapshot, 'Observed At', formatTime(trace.createdAt));
   };
 
+  const buildParticipantBody = (values, fallback) => {
+    const unique = [];
+    values.forEach((value) => {
+      if (typeof value !== 'string') return;
+      const normalized = value.trim();
+      if (!normalized || unique.includes(normalized)) return;
+      unique.push(normalized);
+    });
+    return unique.length ? unique.join('\\n') : fallback;
+  };
+
   const renderParticipants = (trace, inspector) => {
     clearChildren(elements.participants);
     if (!elements.participants || !trace) return;
 
     const callerName = trace.a2a && (trace.a2a.callerName || trace.a2a.callerGlobalMetaId)
-      ? [trace.a2a.callerName, trace.a2a.callerGlobalMetaId].filter(Boolean).join(' ')
+      ? buildParticipantBody([trace.a2a.callerName, trace.a2a.callerGlobalMetaId], 'Unknown caller MetaBot')
       : (trace.order && trace.order.role === 'seller'
-        ? [trace.session.peerName, trace.session.peerGlobalMetaId].filter(Boolean).join(' ')
+        ? buildParticipantBody([trace.session && trace.session.peerName, trace.session && trace.session.peerGlobalMetaId], 'Unknown caller MetaBot')
         : (trace.session && trace.session.metabotId != null ? 'Local MetaBot #' + trace.session.metabotId : 'Local MetaBot'));
     const remoteName = trace.a2a && trace.a2a.role === 'provider'
-      ? [trace.a2a.callerName, trace.a2a.callerGlobalMetaId].filter(Boolean).join(' ')
-      : [trace.a2a && trace.a2a.providerName, trace.a2a && trace.a2a.providerGlobalMetaId, trace.session && trace.session.peerName, trace.session && trace.session.peerGlobalMetaId]
-        .filter(Boolean)[0] || [trace.session && trace.session.peerName, trace.session && trace.session.peerGlobalMetaId].filter(Boolean).join(' ');
-    appendListItem(elements.participants, 'Caller MetaBot', callerName || 'Unknown caller MetaBot', 'active');
-    appendListItem(elements.participants, 'Remote MetaBot', remoteName || 'Unknown remote MetaBot', 'active');
+      ? buildParticipantBody([trace.a2a.callerName, trace.a2a.callerGlobalMetaId], 'Unknown remote MetaBot')
+      : buildParticipantBody(
+        [
+          trace.a2a && trace.a2a.providerName,
+          trace.a2a && trace.a2a.providerGlobalMetaId,
+          trace.session && trace.session.peerName,
+          trace.session && trace.session.peerGlobalMetaId,
+        ],
+        'Unknown remote MetaBot'
+      );
+    appendListItem(elements.participants, 'Caller MetaBot', callerName || 'Unknown caller MetaBot', 'active', 'participant-item');
+    appendListItem(elements.participants, 'Remote MetaBot', remoteName || 'Unknown remote MetaBot', 'active', 'participant-item');
     if (trace.order && (trace.order.serviceName || trace.order.serviceId)) {
       appendListItem(
         elements.participants,
         'Requested Capability',
-        [trace.order.serviceName, trace.order.serviceId].filter(Boolean).join(' / '),
-        'neutral'
+        buildParticipantBody([trace.order.serviceName, trace.order.serviceId], 'Unspecified capability'),
+        'neutral',
+        'participant-item'
       );
     }
   };

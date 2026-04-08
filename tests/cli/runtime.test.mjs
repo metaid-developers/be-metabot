@@ -235,6 +235,35 @@ test('identity create autostarts the local daemon and doctor reports the identit
   assert.equal(Number.isInteger(daemonState.pid), true);
 });
 
+test('daemon config restarts keep the previous port so local inspector URLs stay stable', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice'], {
+    METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
+  });
+  assert.equal(created.exitCode, 0);
+
+  const firstDaemonState = JSON.parse(
+    await readFile(path.join(homeDir, '.metabot', 'hot', 'daemon.json'), 'utf8')
+  );
+  const firstPort = new URL(firstDaemonState.baseUrl).port;
+
+  const doctor = await runCommand(homeDir, ['doctor'], {
+    METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:10',
+  });
+  assert.equal(doctor.exitCode, 0);
+  assert.equal(doctor.payload.ok, true);
+
+  const secondDaemonState = JSON.parse(
+    await readFile(path.join(homeDir, '.metabot', 'hot', 'daemon.json'), 'utf8')
+  );
+  const secondPort = new URL(secondDaemonState.baseUrl).port;
+
+  assert.equal(secondPort, firstPort);
+  assert.notEqual(secondDaemonState.configHash, firstDaemonState.configHash);
+});
+
 test('buzz post succeeds immediately after bootstrap identity create', async (t) => {
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
   t.after(async () => stopDaemon(homeDir));

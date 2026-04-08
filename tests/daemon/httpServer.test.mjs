@@ -627,8 +627,8 @@ test('GET /api/trace/:traceId/events returns server-sent trace status events for
   assert.match(body, /"status":"completed"/);
 });
 
-test('GET /ui/hub serves the local HTML hub page', async (t) => {
-  const server = await startServer();
+test('GET /ui/hub serves the built-in yellow-pages view with a real service directory section', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
   const response = await fetch(`${server.baseUrl}/ui/hub`);
@@ -637,6 +637,10 @@ test('GET /ui/hub serves the local HTML hub page', async (t) => {
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
   assert.match(html, /MetaBot Hub/);
+  assert.match(html, /Yellow Pages Directory/);
+  assert.match(html, /data-service-directory/);
+  assert.match(html, /data-service-list/);
+  assert.match(html, /\/api\/network\/services\?online=true/);
 });
 
 test('GET /ui/trace serves a built-in trace inspector wired to the trace API, SSE, and first-class timeout/clarification/manual-action states', async (t) => {
@@ -657,4 +661,18 @@ test('GET /ui/trace serves a built-in trace inspector wired to the trace API, SS
   assert.match(html, /Manual Action/);
   assert.match(html, /Remote Result/);
   assert.match(html, /Rating Follow-Up/);
+});
+
+test('GET /ui/trace gives verbose cards more room and allows long participant values to wrap', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/trace?traceId=trace-weather-123`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(html, /detail-card-wide/);
+  assert.match(html, /participant-item/);
+  assert.match(html, /overflow-wrap:\s*anywhere/);
+  assert.match(html, /grid-column:\s*span 6/);
 });
