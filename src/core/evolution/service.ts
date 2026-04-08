@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { createConfigStore, type ConfigStore } from '../config/configStore';
 import { createLocalEvolutionStore, type LocalEvolutionStore } from './localEvolutionStore';
 import { evaluateSkillAdoption } from './adoptionPolicy';
@@ -10,6 +12,7 @@ import type { SkillExecutionAnalysis, SkillExecutionRecord } from './types';
 
 const DEFAULT_SKILL_NAME = 'metabot-network-directory';
 const SAFE_ID_PREFIX = 'network-directory';
+let globalIdSequence = 0;
 
 function toSafeIdSegment(input: string): string {
   return input.replace(/[^A-Za-z0-9._-]/g, '-');
@@ -78,8 +81,15 @@ function buildReplayExecution(execution: SkillExecutionRecord): SkillExecutionRe
   };
 }
 
-function createServiceId(prefix: string, now: number, salt: number): string {
-  return toSafeIdSegment(`${prefix}.${SAFE_ID_PREFIX}.${now}.${salt}`);
+function nextGlobalIdSequence(): number {
+  globalIdSequence += 1;
+  return globalIdSequence;
+}
+
+function createServiceId(prefix: string, now: number): string {
+  const sequence = nextGlobalIdSequence();
+  const nonce = randomUUID();
+  return toSafeIdSegment(`${prefix}.${SAFE_ID_PREFIX}.${process.pid}.${now}.${sequence}.${nonce}`);
 }
 
 export function createNetworkDirectoryEvolutionService(
@@ -95,7 +105,6 @@ export function createNetworkDirectoryEvolutionService(
   const configStore = options.configStore ?? createConfigStore(options.homeDirOrPaths);
   const evolutionStore = options.evolutionStore ?? createLocalEvolutionStore(options.homeDirOrPaths);
   const getNow = options.now ?? (() => Date.now());
-  let sequence = 0;
 
   return {
     async observeNetworkDirectoryExecution(observation) {
@@ -109,10 +118,18 @@ export function createNetworkDirectoryEvolutionService(
           adoptedVariantId: null,
         };
       }
+      if (!config.evolution_network.autoRecordExecutions) {
+        return {
+          enabled: true,
+          executionId: null,
+          analysisId: null,
+          artifactId: null,
+          adoptedVariantId: null,
+        };
+      }
 
       const executionNow = getNow();
-      sequence += 1;
-      const executionId = createServiceId('execution', executionNow, sequence);
+      const executionId = createServiceId('execution', executionNow);
       const execution = normalizeObservation(observation, executionId);
       await evolutionStore.writeExecution(execution);
 
@@ -132,8 +149,7 @@ export function createNetworkDirectoryEvolutionService(
       }
 
       const analysisNow = getNow();
-      sequence += 1;
-      const analysisId = createServiceId('analysis', analysisNow, sequence);
+      const analysisId = createServiceId('analysis', analysisNow);
       const analysis: SkillExecutionAnalysis = {
         analysisId,
         executionId,

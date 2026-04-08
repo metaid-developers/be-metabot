@@ -290,6 +290,9 @@ function wrapNetworkListServicesDependency(
     const startedAt = Date.now();
     try {
       const result = await listServices(input);
+      if (result.state === 'waiting' || result.state === 'manual_action_required') {
+        return result;
+      }
       const finishedAt = Date.now();
       await observeNetworkDirectoryExecutionSafely(context, {
         skillName: 'metabot-network-directory',

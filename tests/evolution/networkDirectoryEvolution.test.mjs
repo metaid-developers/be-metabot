@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -8,6 +8,7 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const { getBaseSkillContract } = require('../../dist/core/skills/baseSkillRegistry.js');
 const { createLocalEvolutionStore } = require('../../dist/core/evolution/localEvolutionStore.js');
+const { createNetworkDirectoryEvolutionService } = require('../../dist/core/evolution/service.js');
 const {
   classifyNetworkDirectoryExecution,
 } = require('../../dist/core/evolution/skills/networkDirectory/failureClassifier.js');
@@ -369,7 +370,6 @@ test('validator rejects malformed patch value types even when keys are allowed',
 });
 
 test('orchestration service auto-adopts valid same-skill same-scope candidates into active variants', async () => {
-  const { createNetworkDirectoryEvolutionService } = require('../../dist/core/evolution/service.js');
   const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-network-evolution-service-'));
   const configPath = path.join(homeDir, '.metabot', 'hot', 'config.json');
   mkdirSync(path.dirname(configPath), { recursive: true });
@@ -417,4 +417,90 @@ test('orchestration service auto-adopts valid same-skill same-scope candidates i
   assert.equal(artifact.skillName, 'metabot-network-directory');
   assert.equal(artifact.adoption, 'active');
   assert.equal(artifact.status, 'active');
+});
+
+test('orchestration service skips all side effects when autoRecordExecutions is false', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-network-evolution-no-record-'));
+  const configPath = path.join(homeDir, '.metabot', 'hot', 'config.json');
+  mkdirSync(path.dirname(configPath), { recursive: true });
+  writeFileSync(configPath, JSON.stringify({
+    evolution_network: {
+      enabled: true,
+      autoAdoptSameSkillSameScope: true,
+      autoRecordExecutions: false,
+    },
+  }, null, 2), 'utf8');
+
+  const service = createNetworkDirectoryEvolutionService(homeDir);
+  const result = await service.observeNetworkDirectoryExecution({
+    skillName: 'metabot-network-directory',
+    activeVariantId: null,
+    commandTemplate: 'metabot network services --online',
+    startedAt: 1_744_444_820_000,
+    finishedAt: 1_744_444_821_000,
+    envelope: {
+      state: 'failed',
+      data: {},
+    },
+    stdout: '',
+    stderr: 'failed',
+    usedUiFallback: false,
+    manualRecovery: false,
+  });
+
+  assert.equal(result.enabled, true);
+  assert.equal(result.executionId, null);
+  assert.equal(result.analysisId, null);
+  assert.equal(result.artifactId, null);
+  assert.equal(result.adoptedVariantId, null);
+
+  assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'index.json')), false);
+  assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'executions')), false);
+  assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'analyses')), false);
+  assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'artifacts')), false);
+});
+
+test('orchestration service generates unique execution IDs across fresh service instances in one process', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-network-evolution-id-uniqueness-'));
+  const configPath = path.join(homeDir, '.metabot', 'hot', 'config.json');
+  mkdirSync(path.dirname(configPath), { recursive: true });
+  writeFileSync(configPath, JSON.stringify({
+    evolution_network: {
+      enabled: true,
+      autoAdoptSameSkillSameScope: false,
+      autoRecordExecutions: true,
+    },
+  }, null, 2), 'utf8');
+
+  const executionIds = [];
+  for (let index = 0; index < 8; index += 1) {
+    const service = createNetworkDirectoryEvolutionService({
+      homeDirOrPaths: homeDir,
+      now: () => 1_744_444_840_000,
+    });
+    const result = await service.observeNetworkDirectoryExecution({
+      skillName: 'metabot-network-directory',
+      activeVariantId: null,
+      commandTemplate: 'metabot network services --online',
+      startedAt: 1_744_444_840_000,
+      finishedAt: 1_744_444_840_001,
+      envelope: {
+        state: 'failed',
+        data: {},
+      },
+      stdout: '',
+      stderr: 'failed',
+      usedUiFallback: false,
+      manualRecovery: false,
+    });
+    executionIds.push(result.executionId);
+  }
+
+  assert.equal(executionIds.every((executionId) => typeof executionId === 'string' && executionId.length > 0), true);
+  assert.equal(new Set(executionIds).size, executionIds.length);
+
+  const store = createLocalEvolutionStore(homeDir);
+  const index = await store.readIndex();
+  assert.equal(index.executions.length, 8);
+  assert.equal(new Set(index.executions).size, 8);
 });
