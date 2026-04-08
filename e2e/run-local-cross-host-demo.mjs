@@ -10,6 +10,7 @@ const { createRuntimeStateStore } = require('../dist/core/state/runtimeStateStor
 const { buildPresenceSnapshot } = require('../dist/core/discovery/serviceDirectory.js');
 const { rankServicesForDirectory } = require('../dist/core/discovery/serviceRanking.js');
 const { planRemoteCall } = require('../dist/core/delegation/remoteCall.js');
+const { createA2ASessionEngine } = require('../dist/core/a2a/sessionEngine.js');
 const { buildSessionTrace } = require('../dist/core/chat/sessionTrace.js');
 const { exportSessionArtifacts } = require('../dist/core/chat/transcriptExport.js');
 
@@ -156,6 +157,7 @@ export async function runLocalCrossHostDemo({
   const callerHome = await mkdtemp(path.join(os.tmpdir(), `metabot-${callerHost}-`));
   const providerHome = await mkdtemp(path.join(os.tmpdir(), `metabot-${providerHost}-`));
   const callerStore = createRuntimeStateStore(callerHome);
+  const sessionEngine = createA2ASessionEngine();
 
   try {
     const providerIdentity = assertCommandSucceeded(
@@ -230,11 +232,31 @@ export async function runLocalCrossHostDemo({
       throw new Error(`Expected a ready remote call plan, received ${call.state}:${call.code}`);
     }
 
+    const started = sessionEngine.startCallerSession({
+      traceId: call.traceId,
+      servicePinId: call.service.servicePinId,
+      callerGlobalMetaId: callerIdentity.globalMetaId,
+      providerGlobalMetaId: call.service.providerGlobalMetaId,
+      userTask: task,
+      taskContext,
+    });
+    const plannedCall = {
+      ...call,
+      session: {
+        sessionId: started.session.sessionId,
+        taskRunId: started.taskRun.runId,
+        role: started.session.role,
+        state: started.session.state,
+        event: started.event,
+        externalConversationId: started.linkage.externalConversationId,
+      },
+    };
+
     const remoteExecution = await postSuccessJson(
       `${providerDaemon.baseUrl}/api/services/execute`,
       {
         traceId: call.traceId,
-        externalConversationId: call.session.externalConversationId,
+        externalConversationId: plannedCall.session.externalConversationId,
         servicePinId: call.service.servicePinId,
         providerGlobalMetaId: call.service.providerGlobalMetaId,
         buyer: {
@@ -263,7 +285,7 @@ export async function runLocalCrossHostDemo({
         metabotId: callerState.identity.metabotId,
         peerGlobalMetaId: providerIdentity.globalMetaId,
         peerName: providerService.displayName,
-        externalConversationId: call.session.externalConversationId,
+        externalConversationId: plannedCall.session.externalConversationId,
       },
       order: {
         id: `order-${call.traceId}`,
@@ -273,6 +295,19 @@ export async function runLocalCrossHostDemo({
         paymentTxid: null,
         paymentCurrency: call.payment.currency,
         paymentAmount: call.payment.amount,
+      },
+      a2a: {
+        sessionId: started.session.sessionId,
+        taskRunId: started.taskRun.runId,
+        role: started.session.role,
+        publicStatus: 'requesting_remote',
+        latestEvent: started.event,
+        taskRunState: started.taskRun.state,
+        callerGlobalMetaId: callerIdentity.globalMetaId,
+        callerName,
+        providerGlobalMetaId: providerIdentity.globalMetaId,
+        providerName: providerService.displayName,
+        servicePinId: providerService.servicePinId,
       },
     });
     const artifacts = await exportSessionArtifacts({
@@ -347,7 +382,7 @@ export async function runLocalCrossHostDemo({
         callerDaemonBaseUrl: callerDaemon.baseUrl,
         providerDaemonBaseUrl: providerDaemon.baseUrl,
       },
-      call,
+      call: plannedCall,
       remoteExecution,
       trace,
       artifacts,

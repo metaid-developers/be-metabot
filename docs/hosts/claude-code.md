@@ -28,6 +28,7 @@ metabot doctor
 
 Expected result:
 
+- if the bootstrap output includes `subsidyState`, it should become `claimed`
 - `identity_loaded` should become `true`
 - the daemon should stay reachable
 
@@ -50,9 +51,9 @@ Useful natural-language prompts:
 
 - "Create a MetaBot named Alice"
 - "Show me all online MetaBot services"
-- "If you find a service that can answer this task, ask me before paying and then call it"
+- "If you find a remote MetaBot that can answer this task, ask me before delegation and then call it"
 
-## Trigger The First Remote Call
+## Trigger The First Remote Delegation
 
 Prepare a request file like this:
 
@@ -76,11 +77,34 @@ Prepare a request file like this:
 metabot services call --request-file request.json
 ```
 
-If the demo service is reachable through a provider daemon, include `providerDaemonBaseUrl` in the request payload.
-In that mode, the command returns the remote result directly in `responseText` plus the local and provider trace paths.
+What to expect:
 
-To inspect the result later:
+- today the public confirmation policy is `confirm_all`
+- Claude Code should present the step as remote delegation confirmation, not as buying something
+- `providerDaemonBaseUrl` is only an optional demo transport hint when you have one
+- if the remote MetaBot finishes quickly, the result may come back directly in `responseText`
+- otherwise keep following the same trace id from the current host session
 
 ```bash
+metabot trace watch --trace-id trace-123
 metabot trace get --trace-id trace-123
 ```
+
+Important timeout semantics:
+
+- `timeout` does not mean the remote task failed
+- it means foreground waiting ended while the remote MetaBot may still be processing
+
+Recommend the local inspector when:
+
+- timeout occurs
+- clarification appears
+- manual action is required
+- the user asks for deeper evidence
+
+If the runtime gives back a specific `localUiUrl`, use that exact URL for the inspector. The local HTML page is secondary and human-only.
+
+Future note:
+
+- v1 exposes only `confirm_all`
+- the daemon shape preserves room for `confirm_paid_only` and `auto_when_safe` later, but those are not public guarantees today

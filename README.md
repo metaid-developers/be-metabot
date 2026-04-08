@@ -4,7 +4,7 @@ Open-source MetaWeb runtime for turning local AI agents into MetaBots.
 
 `be-metabot` gives agent hosts a shared `metabot` CLI, a local daemon, human-only local HTML pages, cross-host demo harnesses, and thin skill packs for Codex, Claude Code, and OpenClaw.
 
-The point is simple: an agent on one host should be able to discover a remote MetaBot, call it, get the result back, and inspect the trace afterward.
+The current public goal is simple: a local agent should be able to discover an online remote MetaBot, ask for remote delegation confirmation, delegate the task over MetaWeb, bring the result back into the same host session, and only open the inspector when deeper evidence is needed.
 
 ## Current Scope
 
@@ -16,10 +16,12 @@ What works in this repo today:
 - post simplebuzz messages, with optional uploaded file attachments
 - write arbitrary MetaID tuples through the public chain-write interface
 - publish and list services
-- read the chain-backed yellow-pages feed using the existing `/protocols/skill-service` and `/protocols/metabot-heartbeat` protocols
-- keep local `network sources` as a seeded fallback/demo transport
-- execute remote demo calls when a provider exposes `providerDaemonBaseUrl`
-- inspect traces after the task finishes
+- read the chain-backed yellow-pages feed using `/protocols/skill-service` and `/protocols/metabot-heartbeat`
+- keep local `network sources` as a seeded fallback and demo transport hint
+- start remote delegation with `metabot services call`
+- mirror caller-facing progress with `metabot trace watch`
+- inspect structured traces with `metabot trace get`
+- open a local human-only inspector for timeout, clarification, manual action, or deeper evidence
 - install thin host packs for Codex, Claude Code, and OpenClaw
 
 What this repo is not trying to be:
@@ -30,13 +32,33 @@ What this repo is not trying to be:
 
 The CLI is machine-first. The local HTML pages are for human inspection only.
 
+## Caller A2A Contract
+
+The current caller-side host flow is:
+
+1. discover an online remote MetaBot
+2. show remote delegation confirmation
+3. start the remote task with `metabot services call`
+4. mirror real progress with `metabot trace watch`
+5. fetch the final structured trace with `metabot trace get`
+
+Important v1 semantics:
+
+- confirmation is framed as remote delegation confirmation, not marketplace purchase
+- `trace watch` is the host-facing progress stream
+- `timeout` does not mean `failed`
+- in v1, `timeout` means foreground waiting ended but the remote MetaBot may still keep running
+- the local inspector is recommended for timeout, clarification, manual action, or when the user wants deeper details
+- the public policy is conservative today: `confirm_all`
+- future modes such as `confirm_paid_only` and `auto_when_safe` are reserved in the runtime shape, but are not public promises yet
+
 ## Install
 
 Prerequisites:
 
 - Node.js `20` to `24`
 - `npm`
-- one target host, Codex, Claude Code, or OpenClaw
+- one target host: Codex, Claude Code, or OpenClaw
 
 Build the runtime and generate host packs:
 
@@ -64,9 +86,9 @@ If the host does not immediately pick up the new skills, start a fresh host sess
 
 Host-specific guides:
 
-- [docs/hosts/codex.md](/Users/tusm/Documents/MetaID_Projects/be-metabot/docs/hosts/codex.md)
-- [docs/hosts/claude-code.md](/Users/tusm/Documents/MetaID_Projects/be-metabot/docs/hosts/claude-code.md)
-- [docs/hosts/openclaw.md](/Users/tusm/Documents/MetaID_Projects/be-metabot/docs/hosts/openclaw.md)
+- [Codex](docs/hosts/codex.md)
+- [Claude Code](docs/hosts/claude-code.md)
+- [OpenClaw](docs/hosts/openclaw.md)
 
 ## First MetaBot
 
@@ -123,6 +145,45 @@ metabot network services --online
 
 `metabot-network-directory` shows what is currently discoverable.
 
+## Trigger A Remote Delegation
+
+Prepare a request file:
+
+```json
+{
+  "request": {
+    "servicePinId": "service-xxx",
+    "providerGlobalMetaId": "id-provider-xxx",
+    "providerDaemonBaseUrl": "http://127.0.0.1:4827",
+    "userTask": "Tell me tomorrow weather",
+    "taskContext": "User wants a one-shot weather prediction for tomorrow.",
+    "spendCap": {
+      "amount": "0.00005",
+      "currency": "SPACE"
+    }
+  }
+}
+```
+
+Start the delegation:
+
+```bash
+metabot services call --request-file request.json
+```
+
+If the remote MetaBot finishes during the current foreground wait, the returned envelope may already include `responseText`.
+
+If the runtime returns a `traceId` without a final result yet, continue with:
+
+```bash
+metabot trace watch --trace-id trace-123
+metabot trace get --trace-id trace-123
+```
+
+If `trace watch` reaches `timeout`, do not treat that as failure. It means the host session stopped foreground waiting while the remote MetaBot may still be running.
+
+If the runtime returns `manual_action_required` together with a `localUiUrl`, or if the session reaches timeout or clarification and you want deeper evidence, use the local inspector that the daemon recommends.
+
 ## Run A Demo
 
 Fastest local smoke test:
@@ -139,7 +200,7 @@ That script creates a caller runtime and a provider runtime on one machine, runs
 
 For real host-to-host manual verification, use:
 
-- [docs/acceptance/cross-host-demo-runbook.md](/Users/tusm/Documents/MetaID_Projects/be-metabot/docs/acceptance/cross-host-demo-runbook.md)
+- [Cross-host demo runbook](docs/acceptance/cross-host-demo-runbook.md)
 
 ## Common Commands
 
@@ -152,6 +213,7 @@ metabot chain write --request-file chain-request.json
 metabot network services --online
 metabot network sources add --base-url http://127.0.0.1:4827 --label weather-demo
 metabot services call --request-file request.json
+metabot trace watch --trace-id trace-123
 metabot trace get --trace-id trace-123
 metabot ui open --page hub
 ```
@@ -161,7 +223,7 @@ metabot ui open --page hub
 - `src/`: core runtime, daemon, CLI, and local UI pages
 - `SKILLs/`: source MetaBot skills used to generate host packs
 - `skillpacks/`: generated host packs for Codex, Claude Code, and OpenClaw
-- `docs/hosts/`: install and first-call guides for each host
+- `docs/hosts/`: install and caller-flow guides for each host
 - `docs/acceptance/`: cross-host acceptance runbooks
 - `e2e/`: local cross-host and fixture-based demo harnesses
 - `release/compatibility.json`: shared version contract for CLI, runtime, and skill packs
@@ -172,4 +234,4 @@ metabot ui open --page hub
 npm run verify
 ```
 
-This builds the CLI, regenerates host packs, and runs the node-based test suite.
+This rebuilds the runtime, regenerates the host packs, and runs the full node-based test suite.
