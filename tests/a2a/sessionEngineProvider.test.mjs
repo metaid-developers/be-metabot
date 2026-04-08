@@ -6,6 +6,9 @@ const require = createRequire(import.meta.url);
 const {
   createA2ASessionEngine,
 } = require('../../dist/core/a2a/sessionEngine.js');
+const {
+  resolvePublicStatus,
+} = require('../../dist/core/a2a/publicStatus.js');
 
 function createEngine() {
   let sequence = 0;
@@ -32,7 +35,8 @@ test('provider receives a task request and moves to remote_received', () => {
   assert.equal(received.session.state, 'remote_received');
   assert.equal(received.taskRun.state, 'running');
   assert.equal(received.event, 'provider_received');
-  assert.equal(received.publicStatus, 'remote_received');
+  assert.equal(resolvePublicStatus({ event: received.event }).status, 'remote_received');
+  assert.equal(received.runnerResult, null);
 });
 
 test('provider runner completion produces a terminal completion', () => {
@@ -58,7 +62,11 @@ test('provider runner completion produces a terminal completion', () => {
   assert.equal(completed.session.state, 'completed');
   assert.equal(completed.taskRun.state, 'completed');
   assert.equal(completed.event, 'provider_completed');
-  assert.equal(completed.publicStatus, 'completed');
+  assert.equal(resolvePublicStatus({ event: completed.event }).status, 'completed');
+  assert.deepEqual(completed.runnerResult, {
+    state: 'completed',
+    responseText: 'Tomorrow will be bright.',
+  });
 });
 
 test('one clarification round is accepted, and a second request is guarded', () => {
@@ -87,7 +95,11 @@ test('one clarification round is accepted, and a second request is guarded', () 
   assert.equal(firstClarification.taskRun.clarificationRounds.length, 1);
   assert.equal(firstClarification.taskRun.clarificationRounds[0].status, 'pending');
   assert.equal(firstClarification.event, 'clarification_needed');
-  assert.equal(firstClarification.publicStatus, 'manual_action_required');
+  assert.equal(resolvePublicStatus({ event: firstClarification.event }).status, 'manual_action_required');
+  assert.deepEqual(firstClarification.runnerResult, {
+    state: 'needs_clarification',
+    question: 'Which city should I use?',
+  });
 
   const resumed = engine.answerClarification({
     session: firstClarification.session,
@@ -113,5 +125,9 @@ test('one clarification round is accepted, and a second request is guarded', () 
   assert.equal(secondClarification.session.state, 'manual_action_required');
   assert.equal(secondClarification.taskRun.clarificationRounds.length, 1);
   assert.equal(secondClarification.guardCode, 'clarification_round_limit_exceeded');
-  assert.equal(secondClarification.publicStatus, 'manual_action_required');
+  assert.equal(resolvePublicStatus({ event: secondClarification.event }).status, 'manual_action_required');
+  assert.deepEqual(secondClarification.runnerResult, {
+    state: 'needs_clarification',
+    question: 'And what time of day?',
+  });
 });

@@ -6,6 +6,9 @@ const require = createRequire(import.meta.url);
 const {
   createA2ASessionEngine,
 } = require('../../dist/core/a2a/sessionEngine.js');
+const {
+  resolvePublicStatus,
+} = require('../../dist/core/a2a/publicStatus.js');
 
 function createEngine() {
   let sequence = 0;
@@ -37,10 +40,11 @@ test('caller session creation builds a session, task run, and stable linkage fro
   assert.equal(first.session.state, 'requesting_remote');
   assert.equal(first.taskRun.state, 'queued');
   assert.equal(first.event, 'request_sent');
-  assert.equal(first.publicStatus, 'requesting_remote');
+  assert.equal(resolvePublicStatus({ event: first.event }).status, 'requesting_remote');
+  assert.equal(first.runnerResult, null);
   assert.equal(first.linkage.coworkSessionId, 'session-caller-1');
   assert.equal(first.linkage.externalConversationId, secondLinkage.externalConversationId);
-  assert.match(first.linkage.externalConversationId, /^metaweb_order:buyer:idq-provider:/);
+  assert.match(first.linkage.externalConversationId, /^a2a-session:idq-provider:/);
 });
 
 test('foreground timeout becomes public timeout without forcing failed state', () => {
@@ -63,5 +67,6 @@ test('foreground timeout becomes public timeout without forcing failed state', (
   assert.equal(timedOut.taskRun.state, 'timeout');
   assert.equal(timedOut.taskRun.failureCode, null);
   assert.equal(timedOut.event, 'timeout');
-  assert.equal(timedOut.publicStatus, 'timeout');
+  assert.equal(resolvePublicStatus({ event: timedOut.event }).status, 'timeout');
+  assert.equal(timedOut.runnerResult, null);
 });

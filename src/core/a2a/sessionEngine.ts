@@ -1,4 +1,3 @@
-import { resolvePublicStatus, type PublicStatus, type TraceDerivedEventName } from './publicStatus';
 import type {
   A2AClarificationRoundRecord,
   A2ASessionRecord,
@@ -41,11 +40,20 @@ export interface AnswerClarificationInput {
   answer: string;
 }
 
+export type A2ASessionEngineEvent =
+  | 'request_sent'
+  | 'provider_received'
+  | 'provider_executing'
+  | 'provider_completed'
+  | 'timeout'
+  | 'provider_failed'
+  | 'clarification_needed';
+
 export interface SessionEngineMutation {
   session: A2ASessionRecord;
   taskRun: A2ATaskRunRecord;
-  event: TraceDerivedEventName;
-  publicStatus: PublicStatus | null;
+  event: A2ASessionEngineEvent;
+  runnerResult: ProviderServiceRunnerResult | null;
 }
 
 export interface CallerSessionStarted extends SessionEngineMutation {
@@ -90,13 +98,14 @@ function truncateTraceSegment(value: string): string {
 function buildMutation(
   session: A2ASessionRecord,
   taskRun: A2ATaskRunRecord,
-  event: TraceDerivedEventName,
+  event: A2ASessionEngineEvent,
+  runnerResult: ProviderServiceRunnerResult | null = null,
 ): SessionEngineMutation {
   return {
     session,
     taskRun,
     event,
-    publicStatus: resolvePublicStatus({ event }).status,
+    runnerResult,
   };
 }
 
@@ -118,7 +127,7 @@ export function createA2ASessionEngine(options: A2ASessionEngineOptions = {}): A
     sessionId?: string | null;
   }): A2ASessionLinkage => ({
     coworkSessionId: normalizeText(input.sessionId) || null,
-    externalConversationId: `metaweb_order:buyer:${normalizeText(input.providerGlobalMetaId)}:${truncateTraceSegment(normalizeText(input.traceId))}`,
+    externalConversationId: `a2a-session:${normalizeText(input.providerGlobalMetaId)}:${truncateTraceSegment(normalizeText(input.traceId))}`,
   });
 
   const startCallerSession = (input: StartCallerSessionInput): CallerSessionStarted => {
@@ -280,7 +289,7 @@ export function createA2ASessionEngine(options: A2ASessionEngineOptions = {}): A
         failureCode: null,
         failureReason: null,
       };
-      return buildMutation(session, taskRun, 'provider_completed');
+      return buildMutation(session, taskRun, 'provider_completed', input.result);
     }
 
     if (input.result.state === 'failed') {
@@ -298,7 +307,7 @@ export function createA2ASessionEngine(options: A2ASessionEngineOptions = {}): A
         failureCode: normalizeText(input.result.code) || 'provider_runner_failed',
         failureReason: normalizeText(input.result.message) || 'Provider runner failed.',
       };
-      return buildMutation(session, taskRun, 'provider_failed');
+      return buildMutation(session, taskRun, 'provider_failed', input.result);
     }
 
     const clarificationRounds = cloneClarificationRounds(input.taskRun.clarificationRounds);
@@ -316,7 +325,7 @@ export function createA2ASessionEngine(options: A2ASessionEngineOptions = {}): A
         clarificationRounds,
       };
       return {
-        ...buildMutation(session, taskRun, 'clarification_needed'),
+        ...buildMutation(session, taskRun, 'clarification_needed', input.result),
         accepted: false,
         guardCode: 'clarification_round_limit_exceeded',
       };
@@ -347,7 +356,7 @@ export function createA2ASessionEngine(options: A2ASessionEngineOptions = {}): A
       clarificationRounds,
     };
     return {
-      ...buildMutation(session, taskRun, 'clarification_needed'),
+      ...buildMutation(session, taskRun, 'clarification_needed', input.result),
       accepted: true,
       guardCode: null,
     };
