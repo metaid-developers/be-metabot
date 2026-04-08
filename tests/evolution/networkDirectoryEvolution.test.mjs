@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { getBaseSkillContract } = require('../../dist/core/skills/baseSkillRegistry.js');
+const { createLocalEvolutionStore } = require('../../dist/core/evolution/localEvolutionStore.js');
 const {
   classifyNetworkDirectoryExecution,
 } = require('../../dist/core/evolution/skills/networkDirectory/failureClassifier.js');
@@ -362,4 +366,55 @@ test('validator rejects malformed patch value types even when keys are allowed',
 
   assert.equal(result.passed, false);
   assert.equal(result.protocolCompatible, false);
+});
+
+test('orchestration service auto-adopts valid same-skill same-scope candidates into active variants', async () => {
+  const { createNetworkDirectoryEvolutionService } = require('../../dist/core/evolution/service.js');
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-network-evolution-service-'));
+  const configPath = path.join(homeDir, '.metabot', 'hot', 'config.json');
+  mkdirSync(path.dirname(configPath), { recursive: true });
+  writeFileSync(configPath, JSON.stringify({
+    evolution_network: {
+      enabled: true,
+      autoAdoptSameSkillSameScope: true,
+      autoRecordExecutions: true,
+    },
+  }, null, 2), 'utf8');
+
+  const service = createNetworkDirectoryEvolutionService(homeDir);
+  await service.observeNetworkDirectoryExecution({
+    skillName: 'metabot-network-directory',
+    activeVariantId: null,
+    commandTemplate: 'metabot network services --online',
+    startedAt: 1_744_444_800_000,
+    finishedAt: 1_744_444_801_000,
+    envelope: {
+      state: 'success',
+      data: {
+        services: [
+          {
+            servicePinId: 'pin-1',
+            providerGlobalMetaId: 'metaid://provider-1',
+          },
+        ],
+      },
+    },
+    stdout: '',
+    stderr: '',
+    usedUiFallback: true,
+    manualRecovery: false,
+  });
+
+  const store = createLocalEvolutionStore(homeDir);
+  const index = await store.readIndex();
+  assert.equal(index.executions.length, 1);
+  assert.equal(index.analyses.length, 1);
+  assert.equal(index.artifacts.length, 1);
+  assert.equal(index.activeVariants['metabot-network-directory'], index.artifacts[0]);
+
+  const artifactPath = path.join(store.paths.evolutionArtifactsRoot, `${index.artifacts[0]}.json`);
+  const artifact = JSON.parse(readFileSync(artifactPath, 'utf8'));
+  assert.equal(artifact.skillName, 'metabot-network-directory');
+  assert.equal(artifact.adoption, 'active');
+  assert.equal(artifact.status, 'active');
 });

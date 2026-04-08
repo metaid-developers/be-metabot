@@ -1,10 +1,25 @@
 import assert from 'node:assert/strict';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
-const { commandSuccess } = require('../../dist/core/contracts/commandResult.js');
+const { commandFailed, commandSuccess } = require('../../dist/core/contracts/commandResult.js');
+
+function createRuntimeEnv(homeDir) {
+  return {
+    ...process.env,
+    HOME: homeDir,
+    METABOT_HOME: homeDir,
+  };
+}
+
+function readJson(filePath) {
+  return JSON.parse(readFileSync(filePath, 'utf8'));
+}
 
 test('runCli dispatches `metabot network services --online` and preserves the list envelope', async () => {
   const stdout = [];
@@ -141,4 +156,74 @@ test('runCli dispatches `metabot network sources remove --base-url` with parsed 
       baseUrl: 'http://127.0.0.1:4827',
     },
   });
+});
+
+test('runCli records execution and analysis when network-services evolution is enabled and a triggering response occurs', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-network-evolution-'));
+  const stdout = [];
+
+  const exitCode = await runCli(['network', 'services', '--online'], {
+    env: createRuntimeEnv(homeDir),
+    cwd: homeDir,
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      network: {
+        listServices: async () => commandFailed('network_unavailable', 'The chain directory query failed.'),
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.equal(JSON.parse(stdout.join('').trim()).state, 'failed');
+
+  const evolutionRoot = path.join(homeDir, '.metabot', 'evolution');
+  const indexPath = path.join(evolutionRoot, 'index.json');
+  assert.equal(existsSync(indexPath), true);
+
+  const index = readJson(indexPath);
+  assert.equal(index.executions.length, 1);
+  assert.equal(index.analyses.length, 1);
+
+  const executionPath = path.join(evolutionRoot, 'executions', `${index.executions[0]}.json`);
+  const analysisPath = path.join(evolutionRoot, 'analyses', `${index.analyses[0]}.json`);
+  const execution = readJson(executionPath);
+  const analysis = readJson(analysisPath);
+
+  assert.equal(execution.skillName, 'metabot-network-directory');
+  assert.equal(execution.commandTemplate, 'metabot network services --online');
+  assert.equal(analysis.skillName, 'metabot-network-directory');
+  assert.equal(analysis.triggerSource, 'hard_failure');
+  assert.equal(analysis.shouldGenerateCandidate, true);
+});
+
+test('runCli writes no evolution side effects when network-services evolution is disabled', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-network-evolution-disabled-'));
+  const configPath = path.join(homeDir, '.metabot', 'hot', 'config.json');
+  mkdirSync(path.dirname(configPath), { recursive: true });
+  writeFileSync(configPath, JSON.stringify({
+    evolution_network: {
+      enabled: false,
+      autoAdoptSameSkillSameScope: true,
+      autoRecordExecutions: true,
+    },
+  }, null, 2), 'utf8');
+
+  const exitCode = await runCli(['network', 'services', '--online'], {
+    env: createRuntimeEnv(homeDir),
+    cwd: homeDir,
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      network: {
+        listServices: async () => commandFailed('network_unavailable', 'The chain directory query failed.'),
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'index.json')), false);
+  assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'executions')), false);
+  assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'analyses')), false);
+  assert.equal(existsSync(path.join(homeDir, '.metabot', 'evolution', 'artifacts')), false);
 });

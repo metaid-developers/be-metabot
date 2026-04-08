@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { commandFailed, commandSuccess, type MetabotCommandResult } from '../core/contracts/commandResult';
+import { createNetworkDirectoryEvolutionService } from '../core/evolution/service';
 import { resolveMetabotPaths } from '../core/state/paths';
 import {
   createRuntimeStateStore,
@@ -258,6 +259,69 @@ async function requestText(
   return response.text();
 }
 
+async function observeNetworkDirectoryExecutionSafely(
+  context: CliRuntimeContext,
+  observation: Parameters<ReturnType<typeof createNetworkDirectoryEvolutionService>['observeNetworkDirectoryExecution']>[0],
+): Promise<void> {
+  try {
+    const homeDir = normalizeHomeDir(context.env, context.cwd);
+    const evolutionService = createNetworkDirectoryEvolutionService(homeDir);
+    await evolutionService.observeNetworkDirectoryExecution(observation);
+  } catch {
+    // Evolution observation must never block normal CLI command execution.
+  }
+}
+
+type NetworkListServicesHandler = NonNullable<NonNullable<CliDependencies['network']>['listServices']>;
+
+function wrapNetworkListServicesDependency(
+  context: CliRuntimeContext,
+  listServices: NetworkListServicesHandler | undefined,
+): NetworkListServicesHandler | undefined {
+  if (!listServices) {
+    return undefined;
+  }
+
+  return async (input: Parameters<NetworkListServicesHandler>[0]) => {
+    if (input.online !== true) {
+      return listServices(input);
+    }
+
+    const startedAt = Date.now();
+    try {
+      const result = await listServices(input);
+      const finishedAt = Date.now();
+      await observeNetworkDirectoryExecutionSafely(context, {
+        skillName: 'metabot-network-directory',
+        commandTemplate: 'metabot network services --online',
+        startedAt,
+        finishedAt,
+        envelope: result as Record<string, unknown>,
+        stdout: '',
+        stderr: result.ok ? '' : (result.message ?? ''),
+        usedUiFallback: false,
+        manualRecovery: false,
+      });
+      return result;
+    } catch (error) {
+      const finishedAt = Date.now();
+      const message = error instanceof Error ? error.message : String(error);
+      await observeNetworkDirectoryExecutionSafely(context, {
+        skillName: 'metabot-network-directory',
+        commandTemplate: 'metabot network services --online',
+        startedAt,
+        finishedAt,
+        envelope: commandFailed('network_services_execution_failed', message) as Record<string, unknown>,
+        stdout: '',
+        stderr: message,
+        usedUiFallback: false,
+        manualRecovery: false,
+      });
+      throw error;
+    }
+  };
+}
+
 function createTestChainWriteSigner(baseSigner: Signer): Signer {
   let writeCount = 0;
 
@@ -449,13 +513,22 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
 export function mergeCliDependencies(context: CliRuntimeContext): CliDependencies {
   const defaults = createDefaultCliDependencies(context);
   const provided = context.dependencies;
+  const defaultNetwork = defaults.network ?? {};
+  const networkListServices = wrapNetworkListServicesDependency(
+    context,
+    provided.network?.listServices ?? defaultNetwork.listServices,
+  );
   return {
     buzz: { ...defaults.buzz, ...provided.buzz },
     chain: { ...defaults.chain, ...provided.chain },
     daemon: { ...defaults.daemon, ...provided.daemon },
     doctor: { ...defaults.doctor, ...provided.doctor },
     identity: { ...defaults.identity, ...provided.identity },
-    network: { ...defaults.network, ...provided.network },
+    network: {
+      ...defaultNetwork,
+      ...provided.network,
+      listServices: networkListServices,
+    },
     services: { ...defaults.services, ...provided.services },
     chat: { ...defaults.chat, ...provided.chat },
     file: { ...defaults.file, ...provided.file },
