@@ -8,9 +8,9 @@ import type {
   RemoteEvolutionIndexRow,
   SkillVariantArtifact,
 } from './types';
+import { SAFE_IDENTIFIER_PATTERN, validateSafeEvolutionIdentifier } from './localEvolutionStore';
 
 const REMOTE_EVOLUTION_SCHEMA_VERSION = 1 as const;
-const SAFE_IDENTIFIER_PATTERN = /^[A-Za-z0-9._-]+$/;
 
 let atomicWriteSequence = 0;
 const indexUpdateQueues = new Map<string, Promise<void>>();
@@ -35,13 +35,6 @@ function isValidIdentifier(identifier: string): boolean {
     && !path.isAbsolute(identifier)
     && SAFE_IDENTIFIER_PATTERN.test(identifier)
   );
-}
-
-function validateIdentifier(identifier: string, fieldName: string): string {
-  if (!isValidIdentifier(identifier)) {
-    throw new Error(`Invalid ${fieldName}: ${identifier}`);
-  }
-  return identifier;
 }
 
 function normalizeRemoteIndexRow(variantId: string, value: unknown): RemoteEvolutionIndexRow | null {
@@ -214,20 +207,20 @@ export function createRemoteEvolutionStore(homeDirOrPaths: string | MetabotPaths
     },
     async readArtifact(variantId) {
       await ensureRemoteEvolutionLayout(paths);
-      const safeVariantId = validateIdentifier(variantId, 'variantId');
+      const safeVariantId = validateSafeEvolutionIdentifier(variantId, 'variantId');
       const artifactPath = path.join(paths.evolutionRemoteArtifactsRoot, `${safeVariantId}.json`);
       return readJsonFile<SkillVariantArtifact>(artifactPath);
     },
     async readSidecar(variantId) {
       await ensureRemoteEvolutionLayout(paths);
-      const safeVariantId = validateIdentifier(variantId, 'variantId');
+      const safeVariantId = validateSafeEvolutionIdentifier(variantId, 'variantId');
       const metadataPath = path.join(paths.evolutionRemoteArtifactsRoot, `${safeVariantId}.meta.json`);
       return readJsonFile<ImportedRemoteArtifactSidecar>(metadataPath);
     },
     async writeImport({ artifact, sidecar }) {
       return queueIndexUpdate(indexQueueKey, async () => {
         await ensureRemoteEvolutionLayout(paths);
-        const safeVariantId = validateIdentifier(artifact.variantId, 'variantId');
+        const safeVariantId = validateSafeEvolutionIdentifier(artifact.variantId, 'variantId');
         if (sidecar.variantId !== safeVariantId) {
           throw new Error(`Invalid variantId: ${sidecar.variantId}`);
         }

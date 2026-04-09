@@ -10,7 +10,7 @@ import type {
 } from './types';
 
 const EVOLUTION_SCHEMA_VERSION = 1 as const;
-const SAFE_IDENTIFIER_PATTERN = /^[A-Za-z0-9._-]+$/;
+export const SAFE_IDENTIFIER_PATTERN = /^[A-Za-z0-9._-]+$/;
 const KNOWN_INDEX_KEYS = new Set([
   'schemaVersion',
   'executions',
@@ -132,7 +132,7 @@ async function ensureEvolutionLayout(paths: MetabotPaths): Promise<void> {
   await fs.mkdir(paths.evolutionArtifactsRoot, { recursive: true });
 }
 
-function validateIdentifier(identifier: string, fieldName: string): string {
+export function validateSafeEvolutionIdentifier(identifier: string, fieldName: string): string {
   if (
     !identifier
     || identifier === '.'
@@ -204,19 +204,19 @@ export function createLocalEvolutionStore(homeDirOrPaths: string | MetabotPaths)
     },
     async readArtifact(variantId) {
       await ensureEvolutionLayout(paths);
-      const safeVariantId = validateIdentifier(variantId, 'variantId');
+      const safeVariantId = validateSafeEvolutionIdentifier(variantId, 'variantId');
       const filePath = path.join(paths.evolutionArtifactsRoot, `${safeVariantId}.json`);
       return readJsonFile<SkillVariantArtifact>(filePath);
     },
     async readAnalysis(analysisId) {
       await ensureEvolutionLayout(paths);
-      const safeAnalysisId = validateIdentifier(analysisId, 'analysisId');
+      const safeAnalysisId = validateSafeEvolutionIdentifier(analysisId, 'analysisId');
       const filePath = path.join(paths.evolutionAnalysesRoot, `${safeAnalysisId}.json`);
       return readJsonFile<SkillExecutionAnalysis>(filePath);
     },
     async writeExecution(record) {
       await ensureEvolutionLayout(paths);
-      const executionId = validateIdentifier(record.executionId, 'executionId');
+      const executionId = validateSafeEvolutionIdentifier(record.executionId, 'executionId');
       const filePath = path.join(paths.evolutionExecutionsRoot, `${executionId}.json`);
       await writeJsonAtomic(filePath, record);
       await updateIndex((current) => ({
@@ -227,7 +227,7 @@ export function createLocalEvolutionStore(homeDirOrPaths: string | MetabotPaths)
     },
     async writeAnalysis(record) {
       await ensureEvolutionLayout(paths);
-      const analysisId = validateIdentifier(record.analysisId, 'analysisId');
+      const analysisId = validateSafeEvolutionIdentifier(record.analysisId, 'analysisId');
       const filePath = path.join(paths.evolutionAnalysesRoot, `${analysisId}.json`);
       await writeJsonAtomic(filePath, record);
       await updateIndex((current) => ({
@@ -238,7 +238,7 @@ export function createLocalEvolutionStore(homeDirOrPaths: string | MetabotPaths)
     },
     async writeArtifact(record) {
       await ensureEvolutionLayout(paths);
-      const variantId = validateIdentifier(record.variantId, 'variantId');
+      const variantId = validateSafeEvolutionIdentifier(record.variantId, 'variantId');
       const filePath = path.join(paths.evolutionArtifactsRoot, `${variantId}.json`);
       await writeJsonAtomic(filePath, record);
       await updateIndex((current) => ({
@@ -248,8 +248,8 @@ export function createLocalEvolutionStore(homeDirOrPaths: string | MetabotPaths)
       return filePath;
     },
     async setActiveVariant(skillName, variantId) {
-      const safeSkillName = validateIdentifier(skillName, 'skillName');
-      const safeVariantId = validateIdentifier(variantId, 'variantId');
+      const safeSkillName = validateSafeEvolutionIdentifier(skillName, 'skillName');
+      const safeVariantId = validateSafeEvolutionIdentifier(variantId, 'variantId');
       return updateIndex((current) => ({
         ...current,
         activeVariants: normalizeActiveVariants({
@@ -259,7 +259,7 @@ export function createLocalEvolutionStore(homeDirOrPaths: string | MetabotPaths)
       }));
     },
     async clearActiveVariant(skillName) {
-      const safeSkillName = validateIdentifier(skillName, 'skillName');
+      const safeSkillName = validateSafeEvolutionIdentifier(skillName, 'skillName');
       return updateIndex((current) => {
         const activeVariants = { ...current.activeVariants };
         delete activeVariants[safeSkillName];
