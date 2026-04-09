@@ -32,14 +32,17 @@ What this repo is not trying to be:
 
 The CLI is machine-first. The local HTML pages are for human inspection only.
 
-## Evolution Network M1 (Local Only)
+## Evolution Network (M1 + M2-A)
 
-M1 adds a local self-repair loop for one skill only: `metabot-network-directory`.
+The current evolution-network surface is still intentionally narrow and only targets one skill: `metabot-network-directory`.
 
 - Scope in M1: local runtime contract resolution, local execution capture, local analysis records, local rollback/adopt controls
-- Feature gate: `evolution_network.enabled` (global on/off for this M1 surface)
+- Scope in M2-A: manual publish of one locally verified `metabot-network-directory` FIX artifact to MetaWeb as a metadata pin plus a referenced artifact body
+- Feature gate: `evolution_network.enabled` (global on/off for the current evolution surface)
 - Host packs keep stable installed skill identities; `metabot-network-directory` in host packs is a runtime-resolve shim, not the final static contract
-- M1 does **not** include chain publication, chain search, chain import, or cross-device sync for evolution variants
+- M2-A is manual publish only: no auto-publish hooks, no search/import, no trust/ranking, and no shared auto-adopt yet
+- Only verified local artifacts are publishable in M2-A
+- M2-A still does **not** include chain search, chain import, trust ranking, or cross-device sync for evolution variants
 
 Key commands:
 
@@ -49,6 +52,7 @@ metabot config set evolution_network.enabled false
 metabot skills resolve --skill metabot-network-directory --host codex --format markdown
 metabot skills resolve --skill metabot-network-directory --host codex --format json
 metabot evolution status
+metabot evolution publish --skill metabot-network-directory --variant-id <variantId>
 metabot evolution rollback --skill metabot-network-directory
 ```
 
