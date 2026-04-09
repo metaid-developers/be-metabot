@@ -73,6 +73,9 @@ async function loadTemplate(page: MetabotUiPageName): Promise<string> {
 async function renderBuiltInPage(page: MetabotUiPageName): Promise<string> {
   const definition = PAGE_BUILDERS[page]();
   const template = await loadTemplate(page);
+  const extraContent = definition.contentHtml
+    ? `<section class="page-rich-content">${definition.contentHtml}</section>`
+    : '';
   const content = `
     <main class="page">
       <section class="hero">
@@ -96,6 +99,7 @@ async function renderBuiltInPage(page: MetabotUiPageName): Promise<string> {
         <nav class="nav">${renderNav(definition.page)}</nav>
       </section>
       <section class="panels">${renderPanels(definition)}</section>
+      ${extraContent}
     </main>
   `.trim();
   return template

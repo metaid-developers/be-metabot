@@ -676,3 +676,22 @@ test('GET /ui/trace gives verbose cards more room and allows long participant va
   assert.match(html, /overflow-wrap:\s*anywhere/);
   assert.match(html, /grid-column:\s*span 6/);
 });
+
+test('GET /ui/publish serves the built-in provider publish console wired to provider summary and publish APIs', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/publish`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
+  assert.match(html, /Publish Service/);
+  assert.match(html, /data-publish-form/);
+  assert.match(html, /data-publish-provider-card/);
+  assert.match(html, /data-publish-result-card/);
+  assert.match(html, /data-publish-status/);
+  assert.match(html, /\/api\/provider\/summary/);
+  assert.match(html, /\/api\/services\/publish/);
+  assert.match(html, /Real chain pin/i);
+});
