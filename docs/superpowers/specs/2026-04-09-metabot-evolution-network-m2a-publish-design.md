@@ -132,7 +132,8 @@ An artifact is publishable in M2-A only if all of the following are true:
 - the artifact exists in local evolution storage
 - `artifact.skillName` matches the requested `--skill`
 - `artifact.skillName === "metabot-network-directory"`
-- the originating analysis is a `FIX` artifact
+- the linked analysis record referenced by `artifact.lineage.analysisId` exists
+- the linked analysis record reports `evolutionType === "FIX"`
 - `artifact.verification.passed === true`
 
 The artifact does **not** need to be the currently active local variant.
@@ -176,8 +177,9 @@ Required payload fields:
     "analysisId": "analysis-xxx"
   },
   "publisherGlobalMetaId": "idq...",
-  "createdAt": 1775700000000,
-  "updatedAt": 1775700000000
+  "artifactCreatedAt": 1775700000000,
+  "artifactUpdatedAt": 1775700000000,
+  "publishedAt": 1775701234567
 }
 ```
 
@@ -195,7 +197,21 @@ Field semantics:
 - `verificationPassed`, `replayValid`, `notWorseThanBase`: minimal verification summary for future trust decisions
 - `lineage`: parent/root/execution/analysis references
 - `publisherGlobalMetaId`: the identity that published the artifact
-- `createdAt`, `updatedAt`: publication timestamps carried from artifact state
+- `artifactCreatedAt`, `artifactUpdatedAt`: timestamps copied from the local artifact object
+- `publishedAt`: timestamp of the specific metadata publication record written to chain
+
+Derivation rule:
+
+- `evolutionType` and `triggerSource` are not guessed from the artifact itself
+- they are loaded from the linked local analysis record referenced by `artifact.lineage.analysisId`
+- publication must fail if that linked analysis record is missing or malformed
+
+Publication identity rule:
+
+- `variantId` identifies the logical evolution artifact
+- the metadata `pinId` identifies one specific publication record of that artifact
+- repeated publication of the same `variantId` is allowed in M2-A
+- future search/import layers must treat `variantId` and `pinId` as different identities
 
 ## Artifact Body JSON
 
@@ -205,13 +221,11 @@ It should preserve the protocol-relevant fields needed for later import:
 
 - `variantId`
 - `skillName`
-- `status`
 - `scope`
 - `metadata`
 - `patch`
 - `lineage`
 - `verification`
-- `adoption`
 - `createdAt`
 - `updatedAt`
 
@@ -221,6 +235,8 @@ It must **not** include machine-private state such as:
 - local daemon URLs
 - host-specific installation paths
 - mutable local runtime cache fields
+- local activation state such as `status`
+- local adoption state such as `adoption`
 
 The body is the content layer. The metadata pin is the index layer.
 
@@ -234,6 +250,11 @@ metabot evolution publish --skill metabot-network-directory --variant-id <varian
 
 This command is intentionally manual.
 
+It is also gated by the existing evolution subsystem flag:
+
+- when `evolution_network.enabled === false`, `metabot evolution publish` must fail
+- publication must not bypass the global evolution gate
+
 M2-A does not add:
 
 - auto publish hooks
@@ -246,12 +267,13 @@ M2-A does not add:
 The publish flow is:
 
 1. read the local artifact from `~/.metabot/evolution/artifacts/<variantId>.json`
-2. validate publish eligibility
-3. build the shareable artifact body JSON
-4. upload that JSON through the existing file-upload path and receive `artifactUri`
-5. build the metadata payload JSON using the uploaded `artifactUri`
-6. write the metadata pin to `/protocols/metabot-evolution-artifact-v1`
-7. return a machine-first success envelope
+2. read the linked local analysis from `~/.metabot/evolution/analyses/<analysisId>.json`
+3. validate publish eligibility
+4. build the shareable artifact body JSON
+5. upload that JSON through the existing file-upload path and receive `artifactUri`
+6. build the metadata payload JSON using the uploaded `artifactUri` plus the linked analysis fields
+7. write the metadata pin to `/protocols/metabot-evolution-artifact-v1`
+8. return a machine-first success envelope
 
 The flow order matters:
 
@@ -259,6 +281,14 @@ The flow order matters:
 - metadata pin is only written if body upload succeeds
 
 This guarantees that every successful metadata pin references a real body object.
+
+Publish-time coherence checks must also pass before upload begins:
+
+- `analysis.analysisId === artifact.lineage.analysisId`
+- `analysis.skillName === artifact.skillName`
+- `analysis.executionId === artifact.lineage.executionId`
+
+If any coherence check fails, publication fails instead of mixing one artifact with another analysis summary.
 
 ## Success Envelope
 
@@ -272,7 +302,8 @@ Publish success should return:
   "variantId": "variant-xxx",
   "artifactUri": "metafile://artifact-body-pin.json",
   "scopeHash": "scope-hash-v1",
-  "publisherGlobalMetaId": "idq..."
+  "publisherGlobalMetaId": "idq...",
+  "publishedAt": 1775701234567
 }
 ```
 
@@ -291,7 +322,10 @@ Required failure categories:
 - `evolution_variant_not_found`
 - `evolution_variant_skill_mismatch`
 - `evolution_variant_not_verified`
+- `evolution_variant_analysis_mismatch`
+- `evolution_variant_scope_hash_missing`
 - `evolution_publish_not_supported`
+- `evolution_network_disabled`
 - body upload failure via existing upload failure semantics
 - metadata chain-write failure via existing chain-write failure semantics
 
@@ -312,6 +346,19 @@ Publishing an artifact must **not**:
 - write shared-state sync metadata into the local store
 
 This round is publication only. Shared discovery and shared adoption come later.
+
+## Scope Hash Rule
+
+`scopeHash` is treated as a stable compatibility/search key in published metadata.
+
+M2-A must not recompute it.
+
+Rule:
+
+- copy `artifact.metadata.scopeHash` verbatim into published metadata
+- publication fails if `artifact.metadata.scopeHash` is missing or empty
+
+This keeps M2-A compatible with the current local artifact generator and avoids introducing a second competing scope-hash derivation rule during the publish round.
 
 ## Implementation Shape
 
