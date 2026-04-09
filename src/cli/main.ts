@@ -13,6 +13,7 @@ import { runFileCommand } from './commands/file';
 import { runTraceCommand } from './commands/trace';
 import { runUiCommand } from './commands/ui';
 import { commandUnknownSubcommand } from './commands/helpers';
+import { helpRequested, writeResolvedHelp } from './commandHelp';
 import { createCliRuntimeContext, type CliContext } from './types';
 import { mergeCliDependencies, serveCliDaemonProcess } from './runtime';
 
@@ -34,46 +35,50 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
   let result: MetabotCommandResult<unknown>;
 
   try {
-    switch (command) {
-      case 'buzz':
-        result = await runBuzzCommand(rest, context);
-        break;
-      case 'chain':
-        result = await runChainCommand(rest, context);
-        break;
-      case 'daemon':
-        result = await runDaemonCommand(rest, context);
-        break;
-      case 'doctor':
-        result = await runDoctorCommand(rest, context);
-        break;
-      case 'identity':
-        result = await runIdentityCommand(rest, context);
-        break;
-      case 'network':
-        result = await runNetworkCommand(rest, context);
-        break;
-      case 'services':
-        result = await runServicesCommand(rest, context);
-        break;
-      case 'chat':
-        result = await runChatCommand(rest, context);
-        break;
-      case 'file':
-        result = await runFileCommand(rest, context);
-        break;
-      case 'trace':
-        result = await runTraceCommand(rest, context);
-        break;
-      case 'ui':
-        result = await runUiCommand(rest, context);
-        break;
-      case undefined:
-        result = commandFailed('missing_command', 'No command provided.');
-        break;
-      default:
-        result = commandUnknownSubcommand(command);
-        break;
+    if (helpRequested(argv)) {
+      result = writeResolvedHelp(context, argv);
+    } else {
+      switch (command) {
+        case 'buzz':
+          result = await runBuzzCommand(rest, context);
+          break;
+        case 'chain':
+          result = await runChainCommand(rest, context);
+          break;
+        case 'daemon':
+          result = await runDaemonCommand(rest, context);
+          break;
+        case 'doctor':
+          result = await runDoctorCommand(rest, context);
+          break;
+        case 'identity':
+          result = await runIdentityCommand(rest, context);
+          break;
+        case 'network':
+          result = await runNetworkCommand(rest, context);
+          break;
+        case 'services':
+          result = await runServicesCommand(rest, context);
+          break;
+        case 'chat':
+          result = await runChatCommand(rest, context);
+          break;
+        case 'file':
+          result = await runFileCommand(rest, context);
+          break;
+        case 'trace':
+          result = await runTraceCommand(rest, context);
+          break;
+        case 'ui':
+          result = await runUiCommand(rest, context);
+          break;
+        case undefined:
+          result = commandFailed('missing_command', 'No command provided.');
+          break;
+        default:
+          result = commandUnknownSubcommand(command);
+          break;
+      }
     }
   } catch (error) {
     result = commandFailed(

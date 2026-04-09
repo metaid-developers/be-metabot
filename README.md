@@ -91,6 +91,31 @@ Host-specific guides:
 - [Claude Code](docs/hosts/claude-code.md)
 - [OpenClaw](docs/hosts/openclaw.md)
 
+## CLI Help
+
+The CLI now exposes command-tree help at every level:
+
+```bash
+metabot --help
+metabot services --help
+metabot services call --help
+metabot chat private --help
+```
+
+If the current host agent should read the command contract directly, use machine-readable help:
+
+```bash
+metabot services call --help --json
+metabot chat private --help --json
+```
+
+Each leaf help page includes:
+
+- required flags
+- the minimal request JSON shape
+- the expected success fields
+- important failure semantics such as `timeout` not meaning `failed`
+
 ## First MetaBot
 
 Create one local MetaBot from only a name:
