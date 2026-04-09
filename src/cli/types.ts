@@ -53,6 +53,7 @@ export interface CliDependencies {
   evolution?: {
     status?: () => Awaitable<MetabotCommandResult<unknown>>;
     adopt?: (input: { skill: string; variantId: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    publish?: (input: { skill: string; variantId: string }) => Awaitable<MetabotCommandResult<unknown>>;
     rollback?: (input: { skill: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
 }

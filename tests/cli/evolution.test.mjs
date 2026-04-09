@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -7,20 +7,26 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
+const { createConfigStore } = require('../../dist/core/config/configStore.js');
 const { createLocalEvolutionStore } = require('../../dist/core/evolution/localEvolutionStore.js');
+const { createFileSecretStore } = require('../../dist/core/secrets/fileSecretStore.js');
+const { loadIdentity } = require('../../dist/core/identity/loadIdentity.js');
 
-function createRuntimeEnv(homeDir) {
+const FIXTURE_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+
+function createRuntimeEnv(homeDir, overrides = {}) {
   return {
     ...process.env,
     HOME: homeDir,
     METABOT_HOME: homeDir,
+    ...overrides,
   };
 }
 
-async function runEvolutionCli(homeDir, args) {
+async function runEvolutionCli(homeDir, args, envOverrides = {}) {
   const stdout = [];
   const exitCode = await runCli(args, {
-    env: createRuntimeEnv(homeDir),
+    env: createRuntimeEnv(homeDir, envOverrides),
     cwd: homeDir,
     stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
     stderr: { write: () => true },
@@ -75,6 +81,28 @@ function createArtifactRecord(overrides = {}) {
   };
 }
 
+function createAnalysisRecord(overrides = {}) {
+  return {
+    analysisId: 'analysis-1',
+    executionId: 'execution-1',
+    skillName: 'metabot-network-directory',
+    triggerSource: 'hard_failure',
+    evolutionType: 'FIX',
+    shouldGenerateCandidate: true,
+    summary: 'command returned a failed envelope',
+    analyzedAt: 1_744_444_900_800,
+    ...overrides,
+  };
+}
+
+async function seedIdentitySecrets(homeDir) {
+  const secretStore = createFileSecretStore(homeDir);
+  await secretStore.writeIdentitySecrets({
+    mnemonic: FIXTURE_MNEMONIC,
+  });
+  return loadIdentity({ mnemonic: FIXTURE_MNEMONIC });
+}
+
 test('runCli supports `metabot evolution status`', async () => {
   const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-status-'));
   const result = await runEvolutionCli(homeDir, ['evolution', 'status']);
@@ -123,4 +151,130 @@ test('runCli supports `metabot evolution adopt --skill --variant-id` and `metabo
 
   const indexAfterRollback = await store.readIndex();
   assert.equal(indexAfterRollback.activeVariants['metabot-network-directory'], undefined);
+});
+
+test('runCli supports `metabot evolution publish --skill --variant-id` for a verified local artifact without mutating adoption state', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-publish-'));
+  const store = createLocalEvolutionStore(homeDir);
+  const identity = await seedIdentitySecrets(homeDir);
+  const analysis = createAnalysisRecord();
+  const artifact = createArtifactRecord();
+  await store.writeAnalysis(analysis);
+  await store.writeArtifact(artifact);
+
+  const artifactPath = path.join(store.paths.evolutionArtifactsRoot, `${artifact.variantId}.json`);
+  const beforeArtifactRaw = readFileSync(artifactPath, 'utf8');
+  const beforeIndexRaw = readFileSync(store.paths.evolutionIndexPath, 'utf8');
+
+  const result = await runEvolutionCli(
+    homeDir,
+    [
+      'evolution',
+      'publish',
+      '--skill',
+      'metabot-network-directory',
+      '--variant-id',
+      artifact.variantId,
+    ],
+    {
+      METABOT_TEST_FAKE_CHAIN_WRITE: '1',
+    }
+  );
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.match(result.payload.data.pinId, /^\/protocols\/metabot-evolution-artifact-v1-pin-/);
+  assert.deepEqual(result.payload.data.txids, ['/protocols/metabot-evolution-artifact-v1-tx-2']);
+  assert.equal(result.payload.data.skillName, artifact.skillName);
+  assert.equal(result.payload.data.variantId, artifact.variantId);
+  assert.match(result.payload.data.artifactUri, /^metafile:\/\/\/file-pin-1\.json$/);
+  assert.equal(result.payload.data.scopeHash, artifact.metadata.scopeHash);
+  assert.equal(result.payload.data.publisherGlobalMetaId, identity.globalMetaId);
+  assert.equal(typeof result.payload.data.publishedAt, 'number');
+
+  assert.equal(readFileSync(artifactPath, 'utf8'), beforeArtifactRaw);
+  assert.equal(readFileSync(store.paths.evolutionIndexPath, 'utf8'), beforeIndexRaw);
+  assert.deepEqual((await store.readIndex()).activeVariants, {});
+});
+
+test('runCli publish requires --skill', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-publish-'));
+  const result = await runEvolutionCli(homeDir, ['evolution', 'publish', '--variant-id', 'variant-1']);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.payload.ok, false);
+  assert.equal(result.payload.code, 'missing_flag');
+});
+
+test('runCli publish requires --variant-id', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-publish-'));
+  const result = await runEvolutionCli(homeDir, ['evolution', 'publish', '--skill', 'metabot-network-directory']);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.payload.ok, false);
+  assert.equal(result.payload.code, 'missing_flag');
+});
+
+test('runCli publish returns evolution_variant_skill_mismatch when artifact belongs to another skill', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-publish-'));
+  const store = createLocalEvolutionStore(homeDir);
+  await seedIdentitySecrets(homeDir);
+  const artifact = createArtifactRecord({
+    skillName: 'metabot-trace-inspector',
+    lineage: {
+      ...createArtifactRecord().lineage,
+      analysisId: 'analysis-trace',
+    },
+  });
+  const analysis = createAnalysisRecord({
+    analysisId: 'analysis-trace',
+    skillName: 'metabot-trace-inspector',
+  });
+  await store.writeAnalysis(analysis);
+  await store.writeArtifact(artifact);
+
+  const result = await runEvolutionCli(
+    homeDir,
+    [
+      'evolution',
+      'publish',
+      '--skill',
+      'metabot-network-directory',
+      '--variant-id',
+      artifact.variantId,
+    ],
+    {
+      METABOT_TEST_FAKE_CHAIN_WRITE: '1',
+    }
+  );
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.payload.ok, false);
+  assert.equal(result.payload.code, 'evolution_variant_skill_mismatch');
+});
+
+test('runCli publish returns evolution_network_disabled when the evolution network is disabled', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-cli-evolution-publish-'));
+  const configStore = createConfigStore(homeDir);
+  const config = await configStore.read();
+  await configStore.set({
+    ...config,
+    evolution_network: {
+      ...config.evolution_network,
+      enabled: false,
+    },
+  });
+
+  const result = await runEvolutionCli(homeDir, [
+    'evolution',
+    'publish',
+    '--skill',
+    'metabot-network-directory',
+    '--variant-id',
+    'variant-1',
+  ]);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.payload.ok, false);
+  assert.equal(result.payload.code, 'evolution_network_disabled');
 });

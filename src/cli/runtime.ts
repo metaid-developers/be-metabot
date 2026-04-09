@@ -6,6 +6,8 @@ import { commandFailed, commandSuccess, type MetabotCommandResult } from '../cor
 import { createConfigStore, type ConfigStore } from '../core/config/configStore';
 import { createNetworkDirectoryEvolutionService } from '../core/evolution/service';
 import { createLocalEvolutionStore } from '../core/evolution/localEvolutionStore';
+import { publishEvolutionArtifact } from '../core/evolution/publish/publishArtifact';
+import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import { renderResolvedSkillContract } from '../core/skills/skillResolver';
 import type { SkillHost, SkillRenderFormat, SkillVariantArtifact } from '../core/skills/skillContractTypes';
 import { resolveMetabotPaths } from '../core/state/paths';
@@ -33,6 +35,14 @@ const TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV = 'METABOT_TEST_FAKE_PROVIDER_CHAT_
 const TEST_FAKE_METAWEB_REPLY_ENV = 'METABOT_TEST_FAKE_METAWEB_REPLY';
 const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
 let cachedDaemonRuntimeFingerprint: string | null = null;
+
+type EvolutionPublishFailureCode =
+  | 'evolution_variant_not_found'
+  | 'evolution_variant_skill_mismatch'
+  | 'evolution_variant_analysis_mismatch'
+  | 'evolution_variant_scope_hash_missing'
+  | 'evolution_variant_not_verified'
+  | 'evolution_publish_not_supported';
 
 function normalizeBaseUrl(value: string | undefined): string {
   const trimmed = typeof value === 'string' ? value.trim() : '';
@@ -480,6 +490,24 @@ function createTestChainWriteSigner(baseSigner: Signer): Signer {
   };
 }
 
+function isEvolutionPublishFailureCode(value: unknown): value is EvolutionPublishFailureCode {
+  return value === 'evolution_variant_not_found'
+    || value === 'evolution_variant_skill_mismatch'
+    || value === 'evolution_variant_analysis_mismatch'
+    || value === 'evolution_variant_scope_hash_missing'
+    || value === 'evolution_variant_not_verified'
+    || value === 'evolution_publish_not_supported';
+}
+
+function createCliSigner(context: CliRuntimeContext, homeDir: string): Signer {
+  const secretStore = createFileSecretStore(homeDir);
+  const baseSigner = createLocalMnemonicSigner({ secretStore });
+  if (context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1') {
+    return createTestChainWriteSigner(baseSigner);
+  }
+  return baseSigner;
+}
+
 function createTestSubsidyRequester(): (
   options: RequestMvcGasSubsidyOptions
 ) => Promise<RequestMvcGasSubsidyResult> {
@@ -708,6 +736,55 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           artifacts: index.artifacts.length,
           activeVariants: index.activeVariants,
         });
+      },
+      publish: async (input) => {
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const configStore = createConfigStore(homeDir);
+        const config = await configStore.read();
+        if (!config.evolution_network.enabled) {
+          return commandFailed(
+            'evolution_network_disabled',
+            'Evolution network publishing is disabled.'
+          );
+        }
+
+        const evolutionStore = createLocalEvolutionStore(homeDir);
+        const signer = createCliSigner(context, homeDir);
+        const identity = await signer.getIdentity();
+
+        try {
+          const published = await publishEvolutionArtifact({
+            store: evolutionStore,
+            skillName: input.skill,
+            variantId: input.variantId,
+            publisherGlobalMetaId: identity.globalMetaId,
+            uploadArtifactBody: async (filePath) => {
+              const uploaded = await uploadLocalFileToChain({
+                filePath,
+                signer,
+              });
+              return {
+                artifactUri: uploaded.metafileUri,
+              };
+            },
+            writeMetadataPin: async (request) => {
+              const result = await signer.writePin(request);
+              return {
+                pinId: result.pinId,
+                txids: result.txids,
+              };
+            },
+          });
+
+          return commandSuccess(published);
+        } catch (error) {
+          const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
+          const message = error instanceof Error ? error.message : String(error);
+          if (isEvolutionPublishFailureCode(code)) {
+            return commandFailed(code, message);
+          }
+          throw error;
+        }
       },
       adopt: async (input) => {
         const homeDir = normalizeHomeDir(context.env, context.cwd);

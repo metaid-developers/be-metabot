@@ -29,6 +29,22 @@ export async function runEvolutionCommand(args: string[], context: CliRuntimeCon
     return handler({ skill, variantId });
   }
 
+  if (subcommand === 'publish') {
+    const handler = context.dependencies.evolution?.publish;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Evolution publish handler is not configured.');
+    }
+    const skill = readFlagValue(args, '--skill');
+    if (!skill) {
+      return commandMissingFlag('--skill');
+    }
+    const variantId = readFlagValue(args, '--variant-id');
+    if (!variantId) {
+      return commandMissingFlag('--variant-id');
+    }
+    return handler({ skill, variantId });
+  }
+
   if (subcommand === 'rollback') {
     const handler = context.dependencies.evolution?.rollback;
     if (!handler) {
