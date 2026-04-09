@@ -16,6 +16,7 @@ import {
 } from '../core/state/runtimeStateStore';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
 import { buildPublishedService } from '../core/services/publishService';
+import { publishServiceToChain } from '../core/services/servicePublishChain';
 import { planRemoteCall } from '../core/delegation/remoteCall';
 import { buildSessionTrace } from '../core/chat/sessionTrace';
 import type { SessionTraceRecord } from '../core/chat/sessionTrace';
@@ -79,10 +80,14 @@ function resolvePaymentAddress(identity: RuntimeIdentityRecord, currency: string
 }
 
 function summarizeService(record: ReturnType<typeof buildPublishedService>['record']) {
+  const chainPinIds = [...new Set([
+    record.sourceServicePinId,
+    record.currentPinId,
+  ].filter(Boolean))];
   return {
     servicePinId: record.currentPinId,
     sourceServicePinId: record.sourceServicePinId,
-    chainPinIds: [record.sourceServicePinId, record.currentPinId].filter(Boolean),
+    chainPinIds,
     providerGlobalMetaId: record.providerGlobalMetaId,
     providerAddress: record.paymentAddress,
     providerSkill: record.providerSkill,
@@ -1271,37 +1276,50 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('invalid_service_payload', 'Service payload is missing one or more required fields.');
         }
 
-        const now = Date.now();
-        const servicePinId = `service-${sanitizeServiceSegment(serviceName)}-${now.toString(36)}`;
-        const published = buildPublishedService({
-          sourceServicePinId: servicePinId,
-          currentPinId: servicePinId,
-          creatorMetabotId: state.identity.metabotId,
-          providerGlobalMetaId: state.identity.globalMetaId,
-          paymentAddress: resolvePaymentAddress(state.identity, currency),
-          draft: {
-            serviceName,
-            displayName,
-            description,
-            providerSkill,
-            price,
-            currency,
-            outputType,
-            serviceIconUri,
-          },
-          skillDocument,
-          now,
-        });
+        try {
+          const now = Date.now();
+          const published = await publishServiceToChain({
+            signer,
+            creatorMetabotId: state.identity.metabotId,
+            providerGlobalMetaId: state.identity.globalMetaId,
+            paymentAddress: resolvePaymentAddress(state.identity, currency),
+            draft: {
+              serviceName,
+              displayName,
+              description,
+              providerSkill,
+              price,
+              currency,
+              outputType,
+              serviceIconUri,
+            },
+            skillDocument,
+            now,
+          });
 
-        await runtimeStateStore.writeState({
-          ...state,
-          services: [
-            published.record,
-            ...state.services.filter((service) => service.currentPinId !== published.record.currentPinId),
-          ],
-        });
+          await runtimeStateStore.writeState({
+            ...state,
+            services: [
+              published.record,
+              ...state.services.filter((service) => service.currentPinId !== published.record.currentPinId),
+            ],
+          });
 
-        return commandSuccess(summarizeService(published.record));
+          return commandSuccess({
+            ...summarizeService(published.record),
+            txids: published.chainWrite.txids,
+            totalCost: published.chainWrite.totalCost,
+            network: published.chainWrite.network,
+            operation: published.chainWrite.operation,
+            path: published.chainWrite.path,
+            contentType: published.chainWrite.contentType,
+          });
+        } catch (error) {
+          return commandFailed(
+            'service_publish_failed',
+            error instanceof Error ? error.message : String(error)
+          );
+        }
       },
       call: async (rawInput) => {
         const state = await runtimeStateStore.readState();

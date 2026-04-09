@@ -355,7 +355,12 @@ test('services publish persists a local directory entry that network services --
   assert.equal(published.payload.ok, true);
   assert.equal(published.payload.data.displayName, 'Weather Oracle');
   assert.equal(published.payload.data.providerGlobalMetaId, created.payload.data.globalMetaId);
-  assert.match(published.payload.data.servicePinId, /^service-/);
+  assert.match(published.payload.data.servicePinId, /^\/protocols\/skill-service-pin-/);
+  assert.equal(published.payload.data.sourceServicePinId, published.payload.data.servicePinId);
+  assert.equal(
+    published.payload.data.chainPinIds.includes(published.payload.data.servicePinId),
+    true
+  );
 
   const listed = await runCommand(homeDir, ['network', 'services', '--online']);
 
@@ -363,6 +368,7 @@ test('services publish persists a local directory entry that network services --
   assert.equal(listed.payload.ok, true);
   assert.equal(Array.isArray(listed.payload.data.services), true);
   assert.equal(listed.payload.data.services.length, 1);
+  assert.equal(listed.payload.data.services[0].servicePinId, published.payload.data.servicePinId);
   assert.equal(listed.payload.data.services[0].displayName, 'Weather Oracle');
   assert.equal(listed.payload.data.services[0].online, true);
   assert.equal(listed.payload.data.services[0].providerGlobalMetaId, created.payload.data.globalMetaId);
