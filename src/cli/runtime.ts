@@ -532,9 +532,12 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     ui: {
       open: async (input) => {
         const baseUrl = await ensureDaemonBaseUrl(context);
+        const query = input.traceId
+          ? `?traceId=${encodeURIComponent(input.traceId)}`
+          : '';
         return commandSuccess({
           page: input.page,
-          localUiUrl: `${baseUrl}/ui/${input.page}`,
+          localUiUrl: `${baseUrl}/ui/${input.page}${query}`,
         });
       },
     },

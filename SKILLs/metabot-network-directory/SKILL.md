@@ -33,6 +33,7 @@ For the human-only local page:
 
 - Prefer the JSON service list when an agent can continue without UI.
 - Treat each entry as one online remote MetaBot exposing one capability over MetaWeb.
+- After listing online services to a human, call `{{METABOT_CLI}} ui open --page hub` and append the local MetaBot Hub link so the human can open the browser for full details.
 - Once a suitable remote MetaBot is found, pass the selected service entry to `metabot-call-remote-service` so the local MetaBot can ask for delegation confirmation.
 - If a service entry includes `providerDaemonBaseUrl`, keep it with the selected service as an optional transport hint for the first public demo.
 - Use the local HTML page only when a human wants to browse, inspect, or click through.

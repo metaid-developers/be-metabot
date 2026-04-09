@@ -297,6 +297,18 @@ test('fresh daemon starts for the same home reuse the home-derived port', async 
   assert.equal(firstPort, String(getDefaultDaemonPort(homeDir)));
 });
 
+test('ui open trace returns a local trace inspector url with the requested trace id', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  t.after(async () => stopDaemon(homeDir));
+
+  const opened = await runCommand(homeDir, ['ui', 'open', '--page', 'trace', '--trace-id', 'trace-123']);
+
+  assert.equal(opened.exitCode, 0);
+  assert.equal(opened.payload.ok, true);
+  assert.equal(opened.payload.data.page, 'trace');
+  assert.match(opened.payload.data.localUiUrl, /\/ui\/trace\?traceId=trace-123$/);
+});
+
 test('buzz post succeeds immediately after bootstrap identity create', async (t) => {
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
   t.after(async () => stopDaemon(homeDir));

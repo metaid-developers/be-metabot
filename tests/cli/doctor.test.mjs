@@ -71,7 +71,9 @@ function createHarness() {
             calls.ui.push(input);
             return commandSuccess({
               page: input.page,
-              localUiUrl: `/ui/${input.page}`,
+              localUiUrl: input.traceId
+                ? `/ui/${input.page}?traceId=${encodeURIComponent(input.traceId)}`
+                : `/ui/${input.page}`,
             });
           },
         },
@@ -163,6 +165,22 @@ test('runCli dispatches `metabot ui open --page` and returns the local UI URL', 
     data: {
       page: 'hub',
       localUiUrl: '/ui/hub',
+    },
+  });
+});
+
+test('runCli dispatches `metabot ui open --page trace --trace-id` and returns the trace inspector URL', async () => {
+  const harness = createHarness();
+  const exitCode = await runCli(['ui', 'open', '--page', 'trace', '--trace-id', 'trace-123'], harness.context);
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(harness.calls.ui, [{ page: 'trace', traceId: 'trace-123' }]);
+  assert.deepEqual(parseLastJson(harness.stdout), {
+    ok: true,
+    state: 'success',
+    data: {
+      page: 'trace',
+      localUiUrl: '/ui/trace?traceId=trace-123',
     },
   });
 });

@@ -63,6 +63,12 @@ If the call returns a trace id and the local MetaBot is still waiting on the rem
 {{METABOT_CLI}} trace watch --trace-id trace-123
 ```
 
+When a finished trace should be inspectable in the browser:
+
+```bash
+{{METABOT_CLI}} ui open --page trace --trace-id trace-123
+```
+
 ## Confirmation Contract
 
 {{CONFIRMATION_CONTRACT}}
@@ -83,6 +89,7 @@ If the call returns a trace id and the local MetaBot is still waiting on the rem
 - `trace watch` can legally show `timeout` and later `remote_received` / `completed` in the same follow-up. Do not stop at the first `timeout` line if the command is still running.
 - When `trace watch` ends with `completed`, immediately call `{{METABOT_CLI}} trace get --trace-id ...`.
 - If `trace get` returns `resultText`, surface that remote result verbatim. Do not paraphrase, summarize, or rewrite it unless the human explicitly asks you to.
+- After the remote raw result is shown to the human, call `{{METABOT_CLI}} ui open --page trace --trace-id ...` and append the local Trace Inspector link so the human can open the browser and inspect the full delegation details.
 - If `trace get` returns `ratingRequestText`, treat it as the remote MetaBot explicitly asking for the DACT T-stage to finish.
 - Unless the human asked to skip follow-up, publish one concise buyer-side rating with `{{METABOT_CLI}} services rate --request-file ...`.
 - The rating should be written in the local MetaBot's voice as the buyer. Prefer a factual 1-2 sentence comment tied to the actual result. If the human has not complained and the remote result appears usable, a positive 4-5 score is the default.

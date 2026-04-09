@@ -41,7 +41,7 @@ export interface CliDependencies {
     watch?: (input: { traceId: string }) => Awaitable<string>;
   };
   ui?: {
-    open?: (input: { page: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    open?: (input: { page: string; traceId?: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
 }
 
