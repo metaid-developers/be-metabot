@@ -48,7 +48,7 @@ metabot config get evolution_network.enabled
 metabot config set evolution_network.enabled false
 metabot skills resolve --skill metabot-network-directory --host codex --format markdown
 metabot skills resolve --skill metabot-network-directory --host codex --format json
-metabot evolution status --skill metabot-network-directory
+metabot evolution status
 metabot evolution rollback --skill metabot-network-directory
 ```
 
@@ -238,7 +238,7 @@ metabot trace get --trace-id trace-123
 metabot ui open --page hub
 metabot config get evolution_network.enabled
 metabot skills resolve --skill metabot-network-directory --host codex --format json
-metabot evolution status --skill metabot-network-directory
+metabot evolution status
 ```
 
 ## Repository Layout

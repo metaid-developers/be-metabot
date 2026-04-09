@@ -35,7 +35,7 @@ Useful M1 controls:
 ```bash
 metabot config get evolution_network.enabled
 metabot config set evolution_network.enabled false
-metabot evolution status --skill metabot-network-directory
+metabot evolution status
 metabot evolution rollback --skill metabot-network-directory
 ```
 
