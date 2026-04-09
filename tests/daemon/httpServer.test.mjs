@@ -695,3 +695,23 @@ test('GET /ui/publish serves the built-in provider publish console wired to prov
   assert.match(html, /\/api\/services\/publish/);
   assert.match(html, /Real chain pin/i);
 });
+
+test('GET /ui/my-services serves the built-in provider console wired to provider summary and presence toggle APIs', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/my-services`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
+  assert.match(html, /My Services/);
+  assert.match(html, /data-provider-presence-card/);
+  assert.match(html, /data-provider-presence-toggle/);
+  assert.match(html, /data-service-inventory/);
+  assert.match(html, /data-recent-orders/);
+  assert.match(html, /data-manual-actions/);
+  assert.match(html, /\/api\/provider\/summary/);
+  assert.match(html, /\/api\/provider\/presence/);
+  assert.match(html, /Manual actions/i);
+});
