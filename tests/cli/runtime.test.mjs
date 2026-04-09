@@ -8,6 +8,7 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
+const { getDefaultDaemonPort } = require('../../dist/cli/runtime.js');
 
 function parseLastJson(chunks) {
   return JSON.parse(chunks.join('').trim());
@@ -262,6 +263,38 @@ test('daemon config restarts keep the previous port so local inspector URLs stay
 
   assert.equal(secondPort, firstPort);
   assert.notEqual(secondDaemonState.configHash, firstDaemonState.configHash);
+});
+
+test('getDefaultDaemonPort is stable per home and avoids a single shared default port', () => {
+  const firstHome = '/tmp/metabot-home-a';
+  const secondHome = '/tmp/metabot-home-b';
+
+  const firstPort = getDefaultDaemonPort(firstHome);
+  const repeatedFirstPort = getDefaultDaemonPort(firstHome);
+  const secondPort = getDefaultDaemonPort(secondHome);
+
+  assert.equal(firstPort, repeatedFirstPort);
+  assert.notEqual(firstPort, secondPort);
+  assert.equal(firstPort >= 24000 && firstPort < 44000, true);
+  assert.equal(secondPort >= 24000 && secondPort < 44000, true);
+});
+
+test('fresh daemon starts for the same home reuse the home-derived port', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  t.after(async () => stopDaemon(homeDir));
+
+  const firstStart = await runCommand(homeDir, ['daemon', 'start']);
+  assert.equal(firstStart.exitCode, 0);
+  const firstPort = new URL(firstStart.payload.data.baseUrl).port;
+
+  await stopDaemon(homeDir);
+
+  const secondStart = await runCommand(homeDir, ['daemon', 'start']);
+  assert.equal(secondStart.exitCode, 0);
+  const secondPort = new URL(secondStart.payload.data.baseUrl).port;
+
+  assert.equal(firstPort, secondPort);
+  assert.equal(firstPort, String(getDefaultDaemonPort(homeDir)));
 });
 
 test('buzz post succeeds immediately after bootstrap identity create', async (t) => {

@@ -24,6 +24,8 @@ const DEFAULT_DAEMON_HOST = '127.0.0.1';
 const DEFAULT_DAEMON_START_TIMEOUT_MS = 5_000;
 const DAEMON_START_POLL_INTERVAL_MS = 100;
 const DAEMON_PREFERRED_PORT_ENV = 'METABOT_DAEMON_PREFERRED_PORT';
+const DEFAULT_DAEMON_PORT_BASE = 24_000;
+const DEFAULT_DAEMON_PORT_SPAN = 20_000;
 const TEST_FAKE_CHAIN_WRITE_ENV = 'METABOT_TEST_FAKE_CHAIN_WRITE';
 const TEST_FAKE_SUBSIDY_ENV = 'METABOT_TEST_FAKE_SUBSIDY';
 const TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV = 'METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY';
@@ -48,7 +50,7 @@ function parseDaemonPort(value: string | undefined): number | null {
   return parsed;
 }
 
-function getDefaultDaemonPort(): number {
+function getLegacyDefaultDaemonPort(): number {
   try {
     const parsed = new URL(DEFAULT_DAEMON_BASE_URL);
     const port = Number.parseInt(parsed.port, 10);
@@ -59,6 +61,23 @@ function getDefaultDaemonPort(): number {
     // Ignore malformed defaults and fall back below.
   }
   return 4827;
+}
+
+export function getDefaultDaemonPort(homeDir?: string): number {
+  const normalizedHomeDir = typeof homeDir === 'string' ? homeDir.trim() : '';
+  if (!normalizedHomeDir) {
+    return getLegacyDefaultDaemonPort();
+  }
+
+  try {
+    const digest = createHash('sha256')
+      .update(path.resolve(normalizedHomeDir))
+      .digest();
+    const offset = digest.readUInt32BE(0) % DEFAULT_DAEMON_PORT_SPAN;
+    return DEFAULT_DAEMON_PORT_BASE + offset;
+  } catch {
+    return getLegacyDefaultDaemonPort();
+  }
 }
 
 function isAddressInUseError(error: unknown): boolean {
@@ -277,7 +296,7 @@ async function startDetachedDaemon(
         [DAEMON_PREFERRED_PORT_ENV]: String(
           parseDaemonPort(context.env[DAEMON_PREFERRED_PORT_ENV])
           ?? staleRecord?.port
-          ?? getDefaultDaemonPort()
+          ?? getDefaultDaemonPort(homeDir)
         ),
       },
     }
@@ -574,7 +593,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   const explicitPort = parseDaemonPort(context.env.METABOT_DAEMON_PORT);
   const preferredPort = explicitPort
     ?? parseDaemonPort(context.env[DAEMON_PREFERRED_PORT_ENV])
-    ?? getDefaultDaemonPort();
+    ?? getDefaultDaemonPort(homeDir);
   let started;
   try {
     started = await daemon.start(preferredPort, host);
