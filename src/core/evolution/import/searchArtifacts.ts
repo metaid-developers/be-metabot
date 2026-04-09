@@ -39,6 +39,10 @@ function parseTriggerSource(value: string): PublishedEvolutionArtifactSearchResu
   return null;
 }
 
+function createMissingScopeHashError(): Error {
+  return new Error('evolution_scope_hash_missing');
+}
+
 export function deriveResolvedScopeHash(resolved: {
   scopeMetadata?: {
     scopeHash?: string | null;
@@ -46,7 +50,21 @@ export function deriveResolvedScopeHash(resolved: {
   scope: unknown;
 }): string {
   const scopedHash = toNonEmptyString(resolved.scopeMetadata?.scopeHash);
-  return scopedHash ?? JSON.stringify(resolved.scope);
+  if (scopedHash) {
+    return scopedHash;
+  }
+  try {
+    const serialized = JSON.stringify(resolved.scope);
+    if (typeof serialized !== 'string' || serialized.length === 0) {
+      throw createMissingScopeHashError();
+    }
+    return serialized;
+  } catch (error) {
+    if (error instanceof Error && error.message === 'evolution_scope_hash_missing') {
+      throw error;
+    }
+    throw createMissingScopeHashError();
+  }
 }
 
 export async function searchPublishedEvolutionArtifacts(input: {
@@ -72,7 +90,13 @@ export async function searchPublishedEvolutionArtifacts(input: {
     throw new Error(`evolution_search_fetch_failed:${message}`);
   }
 
-  const remoteIndex = await input.remoteStore.readIndex();
+  let remoteIndex: Awaited<ReturnType<typeof input.remoteStore.readIndex>>;
+  try {
+    remoteIndex = await input.remoteStore.readIndex();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`evolution_search_index_failed:${message}`);
+  }
   const dedupedByVariantId = new Map<string, PublishedEvolutionArtifactSearchResult>();
 
   for (const row of rawRows) {

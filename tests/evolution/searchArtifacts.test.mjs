@@ -8,6 +8,9 @@ const {
   deriveResolvedScopeHash,
   searchPublishedEvolutionArtifacts,
 } = require('../../dist/core/evolution/import/searchArtifacts.js');
+const {
+  validateShareableArtifactBody,
+} = require('../../dist/core/evolution/import/publishedArtifactProtocol.js');
 
 function createMetadata(overrides = {}) {
   return {
@@ -84,6 +87,22 @@ test('deriveResolvedScopeHash prefers scope metadata hash and falls back to stri
   assert.equal(
     deriveResolvedScopeHash(resolvedWithoutHash),
     JSON.stringify(resolvedWithoutHash.scope)
+  );
+});
+
+test('deriveResolvedScopeHash throws evolution_scope_hash_missing for non-serializable scope', () => {
+  const scope = {};
+  scope.self = scope;
+  const resolved = {
+    scopeMetadata: {
+      scopeHash: null,
+    },
+    scope,
+  };
+
+  assert.throws(
+    () => deriveResolvedScopeHash(resolved),
+    /evolution_scope_hash_missing/
   );
 });
 
@@ -338,5 +357,87 @@ test('search surfaces invalid non-array page payload as wrapped search-level err
       fetchMetadataRows: async () => ({ data: { list: [] } }),
     }),
     /evolution_search_fetch_failed:invalid_page_payload/
+  );
+});
+
+test('search surfaces remote index read failures as search-level errors', async () => {
+  const remoteStore = {
+    async readIndex() {
+      throw new Error('remote_index_unavailable');
+    },
+  };
+
+  await assert.rejects(
+    searchPublishedEvolutionArtifacts({
+      skillName: 'metabot-network-directory',
+      resolvedScopeHash: 'scope-hash-1',
+      remoteStore,
+      fetchMetadataRows: async () => [],
+    }),
+    /evolution_search_index_failed:remote_index_unavailable/
+  );
+});
+
+test('validateShareableArtifactBody rejects unknown patch keys and non-string patch values', () => {
+  const validBody = {
+    variantId: 'variant-a',
+    skillName: 'metabot-network-directory',
+    scope: {
+      allowedCommands: ['metabot network services'],
+      chainRead: true,
+      chainWrite: false,
+      localUiOpen: true,
+      remoteDelegation: false,
+    },
+    metadata: {
+      sameSkill: true,
+      sameScope: true,
+      scopeHash: 'scope-hash-1',
+    },
+    patch: {
+      instructionsPatch: 'x',
+      commandTemplatePatch: 'y',
+      outputExpectationPatch: 'z',
+      fallbackPolicyPatch: 'f',
+    },
+    lineage: {
+      lineageId: 'lineage-a',
+      parentVariantId: null,
+      rootVariantId: 'variant-a',
+      executionId: 'exec-a',
+      analysisId: 'analysis-a',
+      createdAt: 1_710_000_000_000,
+    },
+    verification: {
+      passed: true,
+      checkedAt: 1_710_000_100_000,
+      protocolCompatible: true,
+      replayValid: true,
+      notWorseThanBase: true,
+    },
+    createdAt: 1_710_000_200_000,
+    updatedAt: 1_710_000_300_000,
+  };
+
+  assert.ok(validateShareableArtifactBody(validBody));
+  assert.equal(
+    validateShareableArtifactBody({
+      ...validBody,
+      patch: {
+        ...validBody.patch,
+        unknownPatchKey: 'nope',
+      },
+    }),
+    null
+  );
+  assert.equal(
+    validateShareableArtifactBody({
+      ...validBody,
+      patch: {
+        ...validBody.patch,
+        instructionsPatch: 123,
+      },
+    }),
+    null
   );
 });

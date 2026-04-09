@@ -1,37 +1,16 @@
 import { SAFE_IDENTIFIER_PATTERN } from '../localEvolutionStore';
 import type { SkillVariantArtifact } from '../types';
+import {
+  EVOLUTION_ARTIFACT_PROTOCOL_VERSION,
+  type PublishedEvolutionArtifactMetadata,
+} from '../protocol';
 
-export const EVOLUTION_ARTIFACT_PROTOCOL_VERSION = '1';
+export {
+  EVOLUTION_ARTIFACT_PROTOCOL_VERSION,
+};
 export const EVOLUTION_SEARCH_MAX_RAW_ROWS = 100;
 
 const METAFILE_SCHEME = 'metafile://';
-
-export interface PublishedEvolutionArtifactMetadata {
-  protocolVersion: typeof EVOLUTION_ARTIFACT_PROTOCOL_VERSION;
-  skillName: string;
-  variantId: string;
-  artifactUri: string;
-  evolutionType: 'FIX';
-  triggerSource: string;
-  scopeHash: string;
-  sameSkill: boolean;
-  sameScope: boolean;
-  verificationPassed: boolean;
-  replayValid: boolean;
-  notWorseThanBase: boolean;
-  lineage: {
-    lineageId: string;
-    parentVariantId: string | null;
-    rootVariantId: string;
-    executionId: string;
-    analysisId: string;
-    createdAt: number;
-  };
-  publisherGlobalMetaId: string;
-  artifactCreatedAt: number;
-  artifactUpdatedAt: number;
-  publishedAt: number;
-}
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -178,6 +157,27 @@ function parseVerification(value: unknown): SkillVariantArtifact['verification']
   };
 }
 
+const ALLOWED_PATCH_KEYS = new Set([
+  'instructionsPatch',
+  'commandTemplatePatch',
+  'outputExpectationPatch',
+  'fallbackPolicyPatch',
+]);
+
+function parsePatch(value: unknown): SkillVariantArtifact['patch'] | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const patch: SkillVariantArtifact['patch'] = {};
+  for (const [key, keyValue] of Object.entries(value)) {
+    if (!ALLOWED_PATCH_KEYS.has(key) || typeof keyValue !== 'string') {
+      return null;
+    }
+    patch[key as keyof SkillVariantArtifact['patch']] = keyValue;
+  }
+  return patch;
+}
+
 export function isSafeEvolutionIdentifier(value: unknown): value is string {
   return (
     typeof value === 'string'
@@ -279,7 +279,7 @@ export function validateShareableArtifactBody(value: unknown): SkillVariantArtif
   const updatedAt = toFiniteNumber(value.updatedAt);
   const scope = parseScope(value.scope);
   const metadata = parseScopeMetadata(value.metadata);
-  const patch = isRecord(value.patch) ? value.patch : null;
+  const patch = parsePatch(value.patch);
   const lineage = parseLineage(value.lineage);
   const verification = parseVerification(value.verification);
 
@@ -305,7 +305,7 @@ export function validateShareableArtifactBody(value: unknown): SkillVariantArtif
     adoption: 'manual',
     scope,
     metadata,
-    patch: patch as SkillVariantArtifact['patch'],
+    patch,
     lineage,
     verification,
     createdAt,

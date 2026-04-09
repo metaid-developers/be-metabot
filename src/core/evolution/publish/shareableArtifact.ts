@@ -2,9 +2,12 @@ import type {
   SkillExecutionAnalysis,
   SkillVariantArtifact,
 } from '../types';
-import { EVOLUTION_ARTIFACT_PROTOCOL_VERSION } from '../import/publishedArtifactProtocol';
+import {
+  EVOLUTION_ARTIFACT_PROTOCOL_PATH,
+  EVOLUTION_ARTIFACT_PROTOCOL_VERSION,
+} from '../protocol';
 
-export const EVOLUTION_ARTIFACT_PROTOCOL_PATH = '/protocols/metabot-evolution-artifact-v1';
+export { EVOLUTION_ARTIFACT_PROTOCOL_PATH };
 
 export interface EvolutionArtifactMetadataInput {
   artifact: SkillVariantArtifact;

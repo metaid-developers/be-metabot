@@ -19,6 +19,9 @@ test('resolveMetabotPaths splits hot state and exports under .metabot', () => {
     evolutionExecutionsRoot: '/tmp/home/.metabot/evolution/executions',
     evolutionAnalysesRoot: '/tmp/home/.metabot/evolution/analyses',
     evolutionArtifactsRoot: '/tmp/home/.metabot/evolution/artifacts',
-    evolutionIndexPath: '/tmp/home/.metabot/evolution/index.json'
+    evolutionIndexPath: '/tmp/home/.metabot/evolution/index.json',
+    evolutionRemoteRoot: '/tmp/home/.metabot/evolution/remote',
+    evolutionRemoteArtifactsRoot: '/tmp/home/.metabot/evolution/remote/artifacts',
+    evolutionRemoteIndexPath: '/tmp/home/.metabot/evolution/remote/index.json',
   });
 });
