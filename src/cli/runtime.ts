@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { commandFailed, commandSuccess, type MetabotCommandResult } from '../core/contracts/commandResult';
 import { createConfigStore, type ConfigStore } from '../core/config/configStore';
 import { createNetworkDirectoryEvolutionService } from '../core/evolution/service';
-import { createLocalEvolutionStore } from '../core/evolution/localEvolutionStore';
+import { createLocalEvolutionStore, parseSkillActiveVariantRef } from '../core/evolution/localEvolutionStore';
 import { createRemoteEvolutionStore } from '../core/evolution/remoteEvolutionStore';
 import { publishEvolutionArtifact } from '../core/evolution/publish/publishArtifact';
 import { createChainEvolutionReader } from '../core/evolution/import/chainEvolutionReader';
@@ -86,25 +86,6 @@ const SUPPORTED_CONFIG_KEYS = new Set<SupportedConfigKey>([
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
-}
-
-function readActiveVariantRef(value: unknown): { source: 'local' | 'remote'; variantId: string } | null {
-  if (typeof value === 'string') {
-    return {
-      source: 'local',
-      variantId: value,
-    };
-  }
-  if (!isRecord(value)) {
-    return null;
-  }
-  if ((value.source === 'local' || value.source === 'remote') && typeof value.variantId === 'string') {
-    return {
-      source: value.source,
-      variantId: value.variantId,
-    };
-  }
-  return null;
 }
 
 function isSupportedConfigKey(key: string): key is SupportedConfigKey {
@@ -466,7 +447,7 @@ async function resolveActiveVariantForSkill(
   const homeDir = normalizeHomeDir(context.env, context.cwd);
   const evolutionStore = createLocalEvolutionStore(homeDir);
   const index = await evolutionStore.readIndex();
-  const activeVariantRef = readActiveVariantRef(index.activeVariants[skillName]);
+  const activeVariantRef = parseSkillActiveVariantRef(index.activeVariants[skillName]);
   if (!activeVariantRef || activeVariantRef.source !== 'local') {
     return null;
   }
@@ -487,7 +468,7 @@ async function clearActiveVariantMapping(
   const homeDir = normalizeHomeDir(context.env, context.cwd);
   const evolutionStore = createLocalEvolutionStore(homeDir);
   const index = await evolutionStore.readIndex();
-  const previousVariantRef = readActiveVariantRef(index.activeVariants[skillName]);
+  const previousVariantRef = parseSkillActiveVariantRef(index.activeVariants[skillName]);
   if (!previousVariantRef) {
     return {
       removed: false,

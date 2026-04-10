@@ -48,6 +48,27 @@ function normalizeStringList(value: unknown): string[] {
   return [...new Set(value.filter((item): item is string => typeof item === 'string'))].sort();
 }
 
+function compareCodePointStrings(left: string, right: string): number {
+  if (left < right) {
+    return -1;
+  }
+  if (left > right) {
+    return 1;
+  }
+  return 0;
+}
+
+function normalizeSafeIdentifier(identifier: unknown, fieldName: string): string | null {
+  if (typeof identifier !== 'string') {
+    return null;
+  }
+  try {
+    return validateSafeEvolutionIdentifier(identifier, fieldName);
+  } catch {
+    return null;
+  }
+}
+
 function normalizeActiveVariantSource(value: unknown): SkillVariantSource | null {
   if (value === 'local' || value === 'remote') {
     return value;
@@ -55,23 +76,28 @@ function normalizeActiveVariantSource(value: unknown): SkillVariantSource | null
   return null;
 }
 
-function normalizeActiveVariantRef(value: unknown): SkillActiveVariantRef | null {
+export function parseSkillActiveVariantRef(value: unknown): SkillActiveVariantRef | null {
   if (typeof value === 'string') {
+    const safeVariantId = normalizeSafeIdentifier(value, 'variantId');
+    if (!safeVariantId) {
+      return null;
+    }
     return {
       source: 'local',
-      variantId: value,
+      variantId: safeVariantId,
     };
   }
   if (!isRecord(value)) {
     return null;
   }
   const source = normalizeActiveVariantSource(value.source);
-  if (!source || typeof value.variantId !== 'string') {
+  const safeVariantId = normalizeSafeIdentifier(value.variantId, 'variantId');
+  if (!source || !safeVariantId) {
     return null;
   }
   return {
     source,
-    variantId: value.variantId,
+    variantId: safeVariantId,
   };
 }
 
@@ -82,13 +108,14 @@ function normalizeActiveVariants(value: unknown): Record<string, SkillActiveVari
 
   const entries: Array<[string, SkillActiveVariantRef]> = [];
   for (const [skillName, refValue] of Object.entries(value)) {
-    const normalizedRef = normalizeActiveVariantRef(refValue);
-    if (typeof skillName === 'string' && normalizedRef) {
-      entries.push([skillName, normalizedRef]);
+    const safeSkillName = normalizeSafeIdentifier(skillName, 'skillName');
+    const normalizedRef = parseSkillActiveVariantRef(refValue);
+    if (safeSkillName && normalizedRef) {
+      entries.push([safeSkillName, normalizedRef]);
     }
   }
 
-  return Object.fromEntries(entries.sort(([left], [right]) => left.localeCompare(right)));
+  return Object.fromEntries(entries.sort(([left], [right]) => compareCodePointStrings(left, right)));
 }
 
 function normalizeIndex(value: unknown): StoredSkillEvolutionIndex {

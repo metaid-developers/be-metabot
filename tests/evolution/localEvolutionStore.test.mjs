@@ -240,6 +240,42 @@ test('local evolution store drops malformed active variant refs during read', as
   assert.deepEqual(index.activeVariants, {});
 });
 
+test('local evolution store drops unsafe active variant identifiers during read', async () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
+  const store = createLocalEvolutionStore(homeDir);
+  await store.ensureLayout();
+  writeFileSync(
+    store.paths.evolutionIndexPath,
+    `${JSON.stringify({
+      schemaVersion: 1,
+      executions: [],
+      analyses: [],
+      artifacts: [],
+      activeVariants: {
+        'metabot-network-directory': '../etc/passwd',
+        'nested/path': 'variant-local-1',
+        'metabot-trace-inspector': {
+          source: 'local',
+          variantId: 'nested/path',
+        },
+        'metabot-import': {
+          source: 'remote',
+          variantId: 'variant-remote-1',
+        },
+      },
+    })}\n`,
+    'utf8'
+  );
+
+  const index = await store.readIndex();
+  assert.deepEqual(index.activeVariants, {
+    'metabot-import': {
+      source: 'remote',
+      variantId: 'variant-remote-1',
+    },
+  });
+});
+
 test('local evolution store rejects unsafe identifiers used for filesystem paths', async () => {
   const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-evolution-store-'));
   const store = createLocalEvolutionStore(homeDir);
