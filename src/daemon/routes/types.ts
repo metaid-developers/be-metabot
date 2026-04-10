@@ -25,9 +25,15 @@ export interface MetabotDaemonHttpHandlers {
     addSource?: (input: { baseUrl: string; label?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     removeSource?: (input: { baseUrl: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  provider?: {
+    getSummary?: () => Awaitable<MetabotCommandResult<unknown>>;
+    setPresence?: (input: { enabled: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
+    confirmRefund?: (input: { orderId: string }) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   services?: {
     publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     call?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    rate?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     execute?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
   chat?: {
@@ -38,6 +44,7 @@ export interface MetabotDaemonHttpHandlers {
   };
   trace?: {
     getTrace?: (input: { traceId: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    watchTrace?: (input: { traceId: string }) => Awaitable<string>;
   };
   ui?: {
     renderPage?: (page: MetabotUiPageName) => Awaitable<string>;
@@ -52,6 +59,7 @@ export interface RouteContext {
   readJsonBody: () => Promise<Record<string, unknown>>;
   sendJson: (status: number, payload: unknown) => void;
   sendHtml: (status: number, html: string) => void;
+  sendText: (status: number, body: string, contentType?: string) => void;
   sendMethodNotAllowed: (allowed: string[]) => void;
 }
 

@@ -8,6 +8,7 @@ import { handleChatRoutes } from './routes/chat';
 import { handleFileRoutes } from './routes/file';
 import { handleIdentityRoutes } from './routes/identity';
 import { handleNetworkRoutes } from './routes/network';
+import { handleProviderRoutes } from './routes/provider';
 import { handleServicesRoutes } from './routes/services';
 import { handleTraceRoutes } from './routes/trace';
 import { handleUiRoutes } from './routes/ui';
@@ -23,6 +24,7 @@ const ROUTES: RouteHandler[] = [
   handleFileRoutes,
   handleIdentityRoutes,
   handleNetworkRoutes,
+  handleProviderRoutes,
   handleServicesRoutes,
   handleTraceRoutes,
   handleUiRoutes,
@@ -45,6 +47,20 @@ function sendHtml(res: http.ServerResponse, status: number, html: string): void 
     'cache-control': 'no-store',
   });
   res.end(html);
+}
+
+function sendText(
+  res: http.ServerResponse,
+  status: number,
+  body: string,
+  contentType = 'text/plain; charset=utf-8',
+): void {
+  res.writeHead(status, {
+    'content-type': contentType,
+    'content-length': Buffer.byteLength(body),
+    'cache-control': 'no-store',
+  });
+  res.end(body);
 }
 
 async function readJsonBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
@@ -88,6 +104,7 @@ export function createHttpServer(handlers: MetabotDaemonHttpHandlers = {}): http
       readJsonBody: () => readJsonBody(req),
       sendJson: (status, payload) => sendJson(res, status, payload),
       sendHtml: (status, html) => sendHtml(res, status, html),
+      sendText: (status, body, contentType) => sendText(res, status, body, contentType),
       sendMethodNotAllowed: (allowed) => {
         res.setHeader('allow', allowed.join(', '));
         sendJson(res, 405, commandFailed('method_not_allowed', `Expected ${allowed.join(' or ')}.`));

@@ -28,16 +28,13 @@ metabot doctor
 
 Expected result:
 
+- if the bootstrap output includes `subsidyState`, it should become `claimed`
 - `identity_loaded` should become `true`
 - the daemon should stay reachable
 
 ## View Online Services
 
-If you want to seed one remote demo provider into the local yellow-pages feed first:
-
-```bash
-metabot network sources add --base-url http://127.0.0.1:4827 --label weather-demo
-```
+`metabot network services --online` reads the public chain directory first, using `/protocols/skill-service` for services and `/protocols/metabot-heartbeat` for online filtering.
 
 For agent-readable discovery:
 
@@ -51,13 +48,19 @@ For the local yellow-pages page:
 metabot ui open --page hub
 ```
 
+If you want to inject one remote demo provider as a local fallback source:
+
+```bash
+metabot network sources add --base-url http://127.0.0.1:4827 --label weather-demo
+```
+
 In Codex, the natural-language intent is usually one of these:
 
 - "帮我创建一个叫 Alice 的 MetaBot"
 - "帮我展示所有在线 MetaBot 服务"
-- "如果发现 Weather Oracle，先告诉我价格并等我确认，再帮我发起远端调用"
+- "如果发现 Weather Oracle，先告诉我预计花费并等我确认，再帮我发起远端委派"
 
-## Trigger The First Remote Call
+## Trigger The First Remote Delegation
 
 Prepare a request file like this:
 
@@ -83,11 +86,36 @@ Then call:
 metabot services call --request-file request.json
 ```
 
-If the demo service is reachable through a provider daemon, include `providerDaemonBaseUrl` in the request payload.
-In that mode, the command returns the remote result directly in `responseText` plus the local and provider trace paths.
+What to expect:
 
-To inspect the result later:
+- today the public policy is conservative: `confirm_all`
+- the current host session should present this as remote delegation confirmation, not as a buy flow
+- if the demo service is reachable through a provider daemon, `providerDaemonBaseUrl` acts as an optional transport hint for the first public demo
+- if the remote MetaBot returns quickly, the result may already be present in `responseText`
+- otherwise the command should still return a `traceId` so Codex can keep following the same remote MetaBot run
+
+Keep the host session updated with:
 
 ```bash
+metabot trace watch --trace-id trace-123
 metabot trace get --trace-id trace-123
 ```
+
+Important timeout semantics:
+
+- `timeout` is not the same as `failed`
+- in v1 it means Codex stopped foreground waiting, but the remote MetaBot may still continue processing
+
+Recommend the local inspector when:
+
+- timeout occurs
+- clarification appears
+- manual action is required
+- the user asks for deeper details
+
+If the runtime returns an exact `localUiUrl`, prefer opening that URL. The local HTML inspector is for human observation only; the main wow moment should still stay inside the Codex session.
+
+Future note:
+
+- v1 publicly uses `confirm_all`
+- the runtime leaves room for `confirm_paid_only` and `auto_when_safe`, but those are future policy modes, not current promises

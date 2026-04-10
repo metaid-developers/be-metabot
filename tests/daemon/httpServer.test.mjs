@@ -10,7 +10,8 @@ const {
   commandFailed,
 } = require('../../dist/core/contracts/commandResult.js');
 
-async function startServer() {
+async function startServer(options = {}) {
+  const useBuiltInUiPages = options.useBuiltInUiPages === true;
   const calls = {
     identity: [],
     chain: [],
@@ -104,7 +105,35 @@ async function startServer() {
         }
         return commandSuccess({
           traceId: 'trace-weather-123',
-          externalConversationId: 'metaweb_order:buyer:gm-weather-seller:trace-weather-1',
+          service: {
+            servicePinId: 'service-weather',
+            providerGlobalMetaId: 'gm-weather-seller',
+            serviceName: 'Weather Oracle',
+            price: '0.00001',
+            currency: 'SPACE',
+          },
+          payment: {
+            amount: '0.00001',
+            currency: 'SPACE',
+          },
+          confirmation: {
+            requiresConfirmation: true,
+            policyMode: 'confirm_all',
+            policyReason: 'confirm_all_requires_confirmation',
+            requestedPolicyMode: 'confirm_all',
+            confirmationBypassed: false,
+            bypassReason: null,
+          },
+          session: {
+            sessionId: 'session-weather-123',
+            taskRunId: 'run-weather-123',
+            role: 'caller',
+            state: 'requesting_remote',
+            publicStatus: 'requesting_remote',
+            event: 'request_sent',
+            coworkSessionId: null,
+            externalConversationId: 'a2a-session:gm-weather-seller:trace-weather-1',
+          },
         });
       },
       execute: async (input) => {
@@ -130,15 +159,30 @@ async function startServer() {
           transcriptPath: '/tmp/trace-weather-123.md',
         });
       },
+      watchTrace: async (input) => [
+        JSON.stringify({
+          traceId: input.traceId,
+          status: 'requesting_remote',
+          terminal: false,
+        }),
+        JSON.stringify({
+          traceId: input.traceId,
+          status: 'completed',
+          terminal: true,
+        }),
+        '',
+      ].join('\n'),
     },
-    ui: {
-      renderPage: async (page) => {
-        if (page !== 'hub') {
-          throw new Error(`Unexpected page ${page}`);
-        }
-        return `<!doctype html><html><head><title>MetaBot Hub</title></head><body><h1>MetaBot Hub</h1></body></html>`;
-      },
-    },
+    ui: useBuiltInUiPages
+      ? undefined
+      : {
+          renderPage: async (page) => {
+            if (page !== 'hub') {
+              throw new Error(`Unexpected page ${page}`);
+            }
+            return `<!doctype html><html><head><title>MetaBot Hub</title></head><body><h1>MetaBot Hub</h1></body></html>`;
+          },
+        },
   });
 
   await new Promise((resolve, reject) => {
@@ -342,7 +386,7 @@ test('GET /api/network/services forwards query filters to network.listServices',
   assert.equal(payload.data.services[0].servicePinId, 'service-weather');
 });
 
-test('POST /api/services/call returns successful task-level call output', async (t) => {
+test('POST /api/services/call returns a delegation, session, and trace start contract', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
 
@@ -371,7 +415,35 @@ test('POST /api/services/call returns successful task-level call output', async 
     state: 'success',
     data: {
       traceId: 'trace-weather-123',
-      externalConversationId: 'metaweb_order:buyer:gm-weather-seller:trace-weather-1',
+      service: {
+        servicePinId: 'service-weather',
+        providerGlobalMetaId: 'gm-weather-seller',
+        serviceName: 'Weather Oracle',
+        price: '0.00001',
+        currency: 'SPACE',
+      },
+      payment: {
+        amount: '0.00001',
+        currency: 'SPACE',
+      },
+      confirmation: {
+        requiresConfirmation: true,
+        policyMode: 'confirm_all',
+        policyReason: 'confirm_all_requires_confirmation',
+        requestedPolicyMode: 'confirm_all',
+        confirmationBypassed: false,
+        bypassReason: null,
+      },
+      session: {
+        sessionId: 'session-weather-123',
+        taskRunId: 'run-weather-123',
+        role: 'caller',
+        state: 'requesting_remote',
+        publicStatus: 'requesting_remote',
+        event: 'request_sent',
+        coworkSessionId: null,
+        externalConversationId: 'a2a-session:gm-weather-seller:trace-weather-1',
+      },
     },
   });
 });
@@ -382,7 +454,7 @@ test('POST /api/services/execute forwards remote execution payloads to services.
 
   const request = {
     traceId: 'trace-weather-123',
-    externalConversationId: 'metaweb_order:buyer:gm-weather-seller:trace-weather-1',
+    externalConversationId: 'a2a-session:gm-weather-seller:trace-weather-1',
     servicePinId: 'service-weather',
     providerGlobalMetaId: 'gm-weather-seller',
     buyer: {
@@ -412,7 +484,7 @@ test('POST /api/services/execute forwards remote execution payloads to services.
     state: 'success',
     data: {
       traceId: 'trace-weather-123',
-      externalConversationId: 'metaweb_order:buyer:gm-weather-seller:trace-weather-1',
+      externalConversationId: 'a2a-session:gm-weather-seller:trace-weather-1',
       responseText: 'Tomorrow will be bright with a light wind.',
       providerGlobalMetaId: 'gm-weather-seller',
       servicePinId: 'service-weather',
@@ -515,8 +587,48 @@ test('GET /api/trace/:traceId forwards the route parameter to trace.getTrace', a
   });
 });
 
-test('GET /ui/hub serves the local HTML hub page', async (t) => {
+test('GET /api/trace/:traceId/watch returns newline-delimited public status events', async (t) => {
   const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/trace/trace-weather-123/watch`);
+  const body = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'application/x-ndjson; charset=utf-8');
+
+  const events = body.trim().split('\n').map((line) => JSON.parse(line));
+  assert.deepEqual(events, [
+    {
+      traceId: 'trace-weather-123',
+      status: 'requesting_remote',
+      terminal: false,
+    },
+    {
+      traceId: 'trace-weather-123',
+      status: 'completed',
+      terminal: true,
+    },
+  ]);
+});
+
+test('GET /api/trace/:traceId/events returns server-sent trace status events for the local inspector', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/trace/trace-weather-123/events`);
+  const body = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'text/event-stream; charset=utf-8');
+  assert.match(body, /event: trace-status/);
+  assert.match(body, /"traceId":"trace-weather-123"/);
+  assert.match(body, /"status":"requesting_remote"/);
+  assert.match(body, /"status":"completed"/);
+});
+
+test('GET /ui/hub serves the built-in yellow-pages view with a real service directory section', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
   const response = await fetch(`${server.baseUrl}/ui/hub`);
@@ -525,4 +637,99 @@ test('GET /ui/hub serves the local HTML hub page', async (t) => {
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
   assert.match(html, /MetaBot Hub/);
+  assert.match(html, /Yellow Pages Directory/);
+  assert.match(html, /data-service-directory/);
+  assert.match(html, /data-service-list/);
+  assert.match(html, /\/api\/network\/services\?online=true/);
+});
+
+test('GET /ui/trace serves a built-in trace inspector wired to the trace API, SSE, and first-class timeout/clarification/manual-action states', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/trace?traceId=trace-weather-123`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
+  assert.match(html, /Trace Inspector/);
+  assert.match(html, /new EventSource\(/);
+  assert.match(html, /\/api\/trace\//);
+  assert.match(html, /\/events/);
+  assert.match(html, /Timeout/);
+  assert.match(html, /Clarification/);
+  assert.match(html, /Manual Action/);
+  assert.match(html, /Remote Result/);
+  assert.match(html, /Rating Follow-Up/);
+});
+
+test('GET /ui/trace gives verbose cards more room and allows long participant values to wrap', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/trace?traceId=trace-weather-123`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(html, /detail-card-wide/);
+  assert.match(html, /participant-item/);
+  assert.match(html, /overflow-wrap:\s*anywhere/);
+  assert.match(html, /grid-column:\s*span 6/);
+});
+
+test('GET /ui/publish serves the built-in provider publish console wired to provider summary and publish APIs', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/publish`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
+  assert.match(html, /Publish Service/);
+  assert.match(html, /data-publish-form/);
+  assert.match(html, /data-publish-provider-card/);
+  assert.match(html, /data-publish-result-card/);
+  assert.match(html, /data-publish-status/);
+  assert.match(html, /\/api\/provider\/summary/);
+  assert.match(html, /\/api\/services\/publish/);
+  assert.match(html, /Real chain pin/i);
+});
+
+test('GET /ui/my-services serves the built-in provider console wired to provider summary and presence toggle APIs', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/my-services`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
+  assert.match(html, /My Services/);
+  assert.match(html, /data-provider-presence-card/);
+  assert.match(html, /data-provider-presence-toggle/);
+  assert.match(html, /data-service-inventory/);
+  assert.match(html, /data-recent-orders/);
+  assert.match(html, /data-manual-actions/);
+  assert.match(html, /\/api\/provider\/summary/);
+  assert.match(html, /\/api\/provider\/presence/);
+  assert.match(html, /Manual actions/i);
+});
+
+test('GET /ui/refund renders the provider refund interruption with exact identifiers and one confirm action', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/refund?orderId=order-refund-1`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
+  assert.match(html, /Manual Refund Confirmation/);
+  assert.match(html, /data-refund-order-id/);
+  assert.match(html, /data-refund-request-pin/);
+  assert.match(html, /data-refund-trace-link/);
+  assert.match(html, /data-refund-confirm/);
+  assert.match(html, /\/api\/provider\/summary/);
+  assert.match(html, /\/api\/provider\/refund\/confirm/);
 });

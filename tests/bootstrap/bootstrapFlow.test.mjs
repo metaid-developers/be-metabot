@@ -92,3 +92,43 @@ test('runBootstrapFlow surfaces manual follow-up when sync stays skippable after
   assert.equal(result.error, 'avatar pin failed');
   assert.deepEqual(result.metabot, { id: 8, name: 'Alice' });
 });
+
+test('runBootstrapFlow stops before chain sync when subsidy request fails', async () => {
+  const calls = [];
+  const phases = [];
+
+  const result = await runBootstrapFlow({
+    request: { name: 'Alice' },
+    onProgress: (progress) => {
+      phases.push(progress.phase);
+    },
+    createMetabot: async () => ({
+      metabot: { id: 9, name: 'Alice' },
+      subsidyInput: {
+        mvcAddress: '15Lofqw6Kpa6P8WnTYXKvmPyw3UZvvQWrB',
+      }
+    }),
+    requestSubsidy: async () => {
+      calls.push('subsidy');
+      return {
+        success: false,
+        error: 'subsidy unavailable',
+      };
+    },
+    syncIdentityToChain: async () => {
+      calls.push('sync');
+      return { success: true };
+    }
+  });
+
+  assert.deepEqual(calls, ['subsidy']);
+  assert.deepEqual(phases, ['identity_created', 'failed']);
+  assert.equal(result.success, false);
+  assert.equal(result.phase, 'failed');
+  assert.equal(result.error, 'subsidy unavailable');
+  assert.deepEqual(result.metabot, { id: 9, name: 'Alice' });
+  assert.deepEqual(result.subsidy, {
+    success: false,
+    error: 'subsidy unavailable',
+  });
+});

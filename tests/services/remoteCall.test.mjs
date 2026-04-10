@@ -34,7 +34,6 @@ test('planRemoteCall allows payment when the service price is under the spend ca
       },
     },
     availableServices: [createAvailableService()],
-    sessionId: 'cowork-session-1',
   });
 
   assert.equal(result.ok, true);
@@ -42,6 +41,8 @@ test('planRemoteCall allows payment when the service price is under the spend ca
   assert.equal(result.service.servicePinId, 'service-weather');
   assert.equal(result.payment.amount, '0.0001');
   assert.equal(result.payment.currency, 'SPACE');
+  assert.equal(result.confirmation.requiresConfirmation, true);
+  assert.equal(result.confirmation.policyMode, 'confirm_all');
 });
 
 test('planRemoteCall blocks payment before broadcast when the service price exceeds the spend cap', () => {
@@ -57,7 +58,6 @@ test('planRemoteCall blocks payment before broadcast when the service price exce
       },
     },
     availableServices: [createAvailableService()],
-    sessionId: 'cowork-session-1',
   });
 
   assert.equal(result.ok, false);
@@ -79,7 +79,6 @@ test('planRemoteCall returns offline when the requested remote service is not av
         servicePinId: 'other-service',
       }),
     ],
-    sessionId: 'cowork-session-1',
   });
 
   assert.equal(result.ok, false);
@@ -87,7 +86,7 @@ test('planRemoteCall returns offline when the requested remote service is not av
   assert.equal(result.code, 'service_offline');
 });
 
-test('planRemoteCall returns a trace id and linked session metadata for successful calls', () => {
+test('planRemoteCall returns a trace id and confirmation metadata for successful calls', () => {
   const result = planRemoteCall({
     request: {
       servicePinId: 'service-weather',
@@ -96,16 +95,40 @@ test('planRemoteCall returns a trace id and linked session metadata for successf
       taskContext: 'Shanghai tomorrow weather',
     },
     availableServices: [createAvailableService()],
-    sessionId: 'cowork-session-1',
     traceId: 'trace-weather-order-1',
   });
 
   assert.equal(result.ok, true);
   assert.equal(result.traceId, 'trace-weather-order-1');
-  assert.deepEqual(result.session, {
-    coworkSessionId: 'cowork-session-1',
-    externalConversationId: 'metaweb_order:buyer:seller-global-metaid:trace-weather-or',
+  assert.equal(result.confirmation.requiresConfirmation, true);
+  assert.equal(result.confirmation.policyReason, 'confirm_all_requires_confirmation');
+});
+
+test('planRemoteCall generates a unique trace id for each new remote call when none is supplied', () => {
+  const first = planRemoteCall({
+    request: {
+      servicePinId: 'service-weather',
+      providerGlobalMetaId: 'seller-global-metaid',
+      userTask: 'check tomorrow weather',
+      taskContext: 'Shanghai tomorrow weather',
+    },
+    availableServices: [createAvailableService()],
   });
+  const second = planRemoteCall({
+    request: {
+      servicePinId: 'service-weather',
+      providerGlobalMetaId: 'seller-global-metaid',
+      userTask: 'check tomorrow weather again',
+      taskContext: 'Shanghai tomorrow weather',
+    },
+    availableServices: [createAvailableService()],
+  });
+
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.notEqual(first.traceId, second.traceId);
+  assert.match(first.traceId, /^trace-seller-global-me-service-weather-[a-z0-9]+-[a-z0-9]+$/);
+  assert.match(second.traceId, /^trace-seller-global-me-service-weather-[a-z0-9]+-[a-z0-9]+$/);
 });
 
 test('planRemoteCall surfaces manual_action_required when refund follow-up must be handled by a human', () => {
@@ -117,7 +140,6 @@ test('planRemoteCall surfaces manual_action_required when refund follow-up must 
       taskContext: 'Shanghai tomorrow weather',
     },
     availableServices: [createAvailableService()],
-    sessionId: 'cowork-session-1',
     traceId: 'trace-weather-order-1',
     manualRefundRequired: true,
   });
@@ -126,5 +148,5 @@ test('planRemoteCall surfaces manual_action_required when refund follow-up must 
   assert.equal(result.state, 'manual_action_required');
   assert.equal(result.code, 'manual_refund_required');
   assert.equal(result.traceId, 'trace-weather-order-1');
-  assert.equal(result.session.coworkSessionId, 'cowork-session-1');
+  assert.equal(result.confirmation.policyMode, 'confirm_all');
 });

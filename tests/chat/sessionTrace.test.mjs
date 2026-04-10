@@ -39,6 +39,57 @@ function createFixtureTrace(homeDir) {
   });
 }
 
+test('buildSessionTrace keeps explicit a2a session and task-run identity separate from chat session identity', () => {
+  const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-chat-trace-'));
+  const trace = buildSessionTrace({
+    traceId: 'trace-a2a-timeout-1',
+    channel: 'a2a',
+    session: {
+      id: 'chat-session-timeout-1',
+      title: 'Weather Timeout',
+      type: 'a2a',
+      metabotId: 11,
+      peerGlobalMetaId: 'idq-provider-weather',
+      peerName: 'Weather Oracle',
+      externalConversationId: 'a2a-session:idq-provider-weather:trace-a2a-time',
+    },
+    order: {
+      id: 'order-a2a-timeout-1',
+      role: 'buyer',
+      serviceId: 'service-weather',
+      serviceName: 'Weather Oracle',
+      paymentTxid: 'b'.repeat(64),
+      paymentCurrency: 'SPACE',
+      paymentAmount: '0.0001',
+    },
+    a2a: {
+      sessionId: 'a2a-session-timeout-1',
+      taskRunId: 'run-timeout-1',
+      role: 'caller',
+      publicStatus: 'timeout',
+      latestEvent: 'clarification_needed',
+      taskRunState: 'needs_clarification',
+      callerGlobalMetaId: 'idq-caller-alice',
+      callerName: 'Alice',
+      providerGlobalMetaId: 'idq-provider-weather',
+      providerName: 'Weather Oracle',
+      servicePinId: 'service-weather',
+    },
+    exportRoot: path.join(homeDir, '.metabot', 'exports'),
+  });
+
+  assert.equal(trace.session.id, 'chat-session-timeout-1');
+  assert.equal(trace.a2a.sessionId, 'a2a-session-timeout-1');
+  assert.equal(trace.a2a.taskRunId, 'run-timeout-1');
+  assert.equal(trace.a2a.role, 'caller');
+  assert.equal(trace.a2a.publicStatus, 'timeout');
+  assert.equal(trace.a2a.latestEvent, 'clarification_needed');
+  assert.equal(trace.a2a.taskRunState, 'needs_clarification');
+  assert.equal(trace.a2a.callerGlobalMetaId, 'idq-caller-alice');
+  assert.equal(trace.a2a.providerGlobalMetaId, 'idq-provider-weather');
+  assert.equal(trace.a2a.servicePinId, 'service-weather');
+});
+
 test('exportSessionArtifacts writes transcript markdown under exports/chats', async () => {
   const homeDir = mkdtempSync(path.join(tmpdir(), 'metabot-chat-trace-'));
   const trace = createFixtureTrace(homeDir);

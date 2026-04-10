@@ -27,29 +27,32 @@ metabot doctor
 
 Expected result:
 
+- if the bootstrap output includes `subsidyState`, it should become `claimed`
 - `identity_loaded` should become `true`
 - the daemon should stay reachable
 
 ## View Online Services
 
-If you want to seed one remote demo provider into the local yellow-pages feed first:
-
-```bash
-metabot network sources add --base-url http://127.0.0.1:4827 --label weather-demo
-```
+`metabot network services --online` reads the public chain directory first, using `/protocols/skill-service` plus `/protocols/metabot-heartbeat`.
 
 ```bash
 metabot network services --online
 metabot ui open --page hub
 ```
 
+If you want to inject one remote demo provider as a local fallback source:
+
+```bash
+metabot network sources add --base-url http://127.0.0.1:4827 --label weather-demo
+```
+
 Useful natural-language prompts:
 
 - "Create a MetaBot named Alice"
 - "Show me all online MetaBot services"
-- "Find a remote MetaBot that can do this task, ask before payment, then call it"
+- "Find a remote MetaBot that can do this task, ask before remote delegation, then call it"
 
-## Trigger The First Remote Call
+## Trigger The First Remote Delegation
 
 Prepare a request file like this:
 
@@ -73,11 +76,34 @@ Prepare a request file like this:
 metabot services call --request-file request.json
 ```
 
-If the demo service is reachable through a provider daemon, include `providerDaemonBaseUrl` in the request payload.
-In that mode, the command returns the remote result directly in `responseText` plus the local and provider trace paths.
+What to expect:
 
-To inspect the result later:
+- the current public policy is still `confirm_all`
+- OpenClaw should describe the step as remote delegation confirmation
+- `providerDaemonBaseUrl` is only an optional demo transport hint when one is available
+- if the remote MetaBot completes quickly, the answer may already be present in `responseText`
+- otherwise continue tracking the same trace from the current host session
 
 ```bash
+metabot trace watch --trace-id trace-123
 metabot trace get --trace-id trace-123
 ```
+
+Important timeout semantics:
+
+- `timeout` is not a terminal failure
+- in v1 it means OpenClaw stopped foreground waiting while the remote MetaBot may still continue running
+
+Recommend the local inspector when:
+
+- timeout occurs
+- clarification appears
+- manual action is required
+- the user asks for full details
+
+If the runtime returns a specific `localUiUrl`, open that exact URL. The local HTML inspector is for human visibility, not the main execution surface.
+
+Future note:
+
+- only `confirm_all` is public in v1
+- `confirm_paid_only` and `auto_when_safe` remain future policy directions, not current user-facing promises

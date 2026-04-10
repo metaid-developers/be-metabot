@@ -1,4 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import { evaluateSpendCap, normalizeSpendCurrency, type SpendCap } from './spendPolicy';
+import { evaluateDelegationPolicy } from '../a2a/delegationPolicy';
+import type { DelegationPolicyDecision } from '../a2a/sessionTypes';
 
 export interface DelegationRequest {
   servicePinId: string;
@@ -31,6 +34,7 @@ export interface RemoteCallRequest {
   taskContext: string;
   rawRequest?: string;
   spendCap?: SpendCap | null;
+  policyMode?: unknown;
 }
 
 export type RemoteCallPlanResult =
@@ -47,10 +51,7 @@ export type RemoteCallPlanResult =
       };
       payment: { amount: string; currency: 'SPACE' | 'BTC' | 'DOGE' | '' };
       traceId: string;
-      session: {
-        coworkSessionId: string | null;
-        externalConversationId: string;
-      };
+      confirmation: DelegationPolicyDecision;
     }
   | {
       ok: false;
@@ -58,10 +59,7 @@ export type RemoteCallPlanResult =
       code: string;
       message: string;
       traceId?: string;
-      session?: {
-        coworkSessionId: string | null;
-        externalConversationId: string;
-      };
+      confirmation?: DelegationPolicyDecision;
     };
 
 const DELEGATE_REMOTE_SERVICE_PREFIX = '[DELEGATE_REMOTE_SERVICE]';
@@ -102,19 +100,9 @@ function buildRemoteCallTraceId(input: {
   if (explicit) return explicit;
   const provider = truncateTraceSegment(normalizeText(input.request.providerGlobalMetaId) || 'provider');
   const service = truncateTraceSegment(normalizeText(input.request.servicePinId) || 'service');
-  return `trace-${provider}-${service}`;
-}
-
-function buildRemoteCallSessionLinkage(input: {
-  providerGlobalMetaId: string;
-  traceId: string;
-  sessionId?: string | null;
-}): { coworkSessionId: string | null; externalConversationId: string } {
-  const externalConversationId = `metaweb_order:buyer:${normalizeText(input.providerGlobalMetaId)}:${truncateTraceSegment(input.traceId)}`;
-  return {
-    coworkSessionId: normalizeText(input.sessionId) || null,
-    externalConversationId,
-  };
+  const timestamp = Date.now().toString(36);
+  const nonce = randomUUID().replace(/-/g, '').slice(0, 8);
+  return `trace-${provider}-${service}-${timestamp}-${nonce}`;
 }
 
 function findTrailingDelegationPrefixFragmentStart(content: string): number {
@@ -274,7 +262,6 @@ export function buildRemoteServicesPrompt(availableServices: RemoteServiceDescri
 export function planRemoteCall(input: {
   request: RemoteCallRequest;
   availableServices: RemoteServiceDescriptor[];
-  sessionId?: string | null;
   traceId?: string | null;
   manualRefundRequired?: boolean;
 }): RemoteCallPlanResult {
@@ -292,11 +279,6 @@ export function planRemoteCall(input: {
     request: input.request,
     traceId: input.traceId,
   });
-  const session = buildRemoteCallSessionLinkage({
-    providerGlobalMetaId: input.request.providerGlobalMetaId,
-    traceId,
-    sessionId: input.sessionId,
-  });
 
   if (!service) {
     return {
@@ -305,12 +287,16 @@ export function planRemoteCall(input: {
       code: 'service_offline',
       message: 'Remote service is offline or unavailable.',
       traceId,
-      session,
     };
   }
 
   const normalizedTerms = normalizeDelegationPaymentTerms(service.price, service.currency);
   const normalizedCurrency = normalizeSpendCurrency(normalizedTerms.currency);
+  const confirmation = evaluateDelegationPolicy({
+    policyMode: input.request.policyMode,
+    estimatedCostAmount: normalizedTerms.price || '0',
+    estimatedCostCurrency: normalizedCurrency,
+  });
   const spendDecision = evaluateSpendCap({
     price: normalizedTerms.price || '0',
     currency: normalizedCurrency,
@@ -323,7 +309,7 @@ export function planRemoteCall(input: {
       code: spendDecision.code || 'remote_call_blocked',
       message: spendDecision.reason || 'Remote call is blocked.',
       traceId,
-      session,
+      confirmation,
     };
   }
 
@@ -334,7 +320,7 @@ export function planRemoteCall(input: {
       code: 'manual_refund_required',
       message: 'Manual refund confirmation is required before continuing.',
       traceId,
-      session,
+      confirmation,
     };
   }
 
@@ -354,6 +340,6 @@ export function planRemoteCall(input: {
       currency: normalizedCurrency,
     },
     traceId,
-    session,
+    confirmation,
   };
 }

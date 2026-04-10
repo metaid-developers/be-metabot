@@ -8,6 +8,7 @@ export async function runUiCommand(args: string[], context: CliRuntimeContext): 
   }
 
   const page = readFlagValue(args, '--page');
+  const traceId = readFlagValue(args, '--trace-id') || undefined;
   if (!page) {
     return commandMissingFlag('--page');
   }
@@ -16,5 +17,5 @@ export async function runUiCommand(args: string[], context: CliRuntimeContext): 
   if (!handler) {
     return commandFailed('not_implemented', 'UI open handler is not configured.');
   }
-  return handler({ page });
+  return handler(traceId ? { page, traceId } : { page });
 }

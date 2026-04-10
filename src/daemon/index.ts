@@ -31,6 +31,9 @@ function resolvePaths(input: string | MetabotPaths): MetabotPaths {
 
 async function closeServer(server: http.Server | null): Promise<void> {
   if (!server) return;
+  if (!server.listening) {
+    return;
+  }
   await new Promise<void>((resolve, reject) => {
     server.close((error) => {
       if (error) {
@@ -87,8 +90,17 @@ export function createMetabotDaemon(options: CreateMetabotDaemonOptions): Metabo
       try {
         server = createHttpServer(handlers);
         await new Promise<void>((resolve, reject) => {
-          server!.listen(port, host, () => resolve());
-          server!.once('error', reject);
+          const handleError = (error: Error) => {
+            server?.off('listening', handleListening);
+            reject(error);
+          };
+          const handleListening = () => {
+            server?.off('error', handleError);
+            resolve();
+          };
+          server!.once('error', handleError);
+          server!.once('listening', handleListening);
+          server!.listen(port, host);
         });
 
         const address = server.address();

@@ -15,5 +15,6 @@ export interface LocalUiPageDefinition {
   heading: string;
   description: string;
   panels: LocalUiPanelDefinition[];
+  contentHtml?: string;
   script: string;
 }

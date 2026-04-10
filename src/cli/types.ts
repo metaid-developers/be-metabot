@@ -28,6 +28,7 @@ export interface CliDependencies {
   services?: {
     publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     call?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    rate?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
   chat?: {
     private?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
@@ -37,9 +38,10 @@ export interface CliDependencies {
   };
   trace?: {
     get?: (input: { traceId: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    watch?: (input: { traceId: string }) => Awaitable<string>;
   };
   ui?: {
-    open?: (input: { page: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    open?: (input: { page: string; traceId?: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
 }
 

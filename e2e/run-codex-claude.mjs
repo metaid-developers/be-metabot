@@ -8,6 +8,7 @@ const { loadIdentity } = require('../dist/core/identity/loadIdentity.js');
 const { buildPublishedService } = require('../dist/core/services/publishService.js');
 const { buildPresenceSnapshot } = require('../dist/core/discovery/serviceDirectory.js');
 const { planRemoteCall } = require('../dist/core/delegation/remoteCall.js');
+const { createA2ASessionEngine } = require('../dist/core/a2a/sessionEngine.js');
 const { buildSessionTrace } = require('../dist/core/chat/sessionTrace.js');
 
 const THIS_FILE = fileURLToPath(import.meta.url);
@@ -49,6 +50,7 @@ export async function runHostFixtureHarness({
   callerHost,
   providerHost,
 }) {
+  const sessionEngine = createA2ASessionEngine();
   const providerFixture = await readJson(providerFixturePath);
   const callerFixture = await readJson(callerFixturePath);
 
@@ -70,6 +72,11 @@ export async function runHostFixtureHarness({
     availableServices: directory.availableServices,
     sessionId: callerFixture.sessionId,
   });
+  const linkage = sessionEngine.buildSessionLinkage({
+    providerGlobalMetaId: identity.globalMetaId,
+    traceId: call.traceId,
+    sessionId: callerFixture.sessionId,
+  });
 
   const trace = buildSessionTrace({
     traceId: call.traceId,
@@ -83,7 +90,7 @@ export async function runHostFixtureHarness({
       metabotId: providerFixture.service.creatorMetabotId,
       peerGlobalMetaId: identity.globalMetaId,
       peerName: providerFixture.service.draft.displayName,
-      externalConversationId: call.session?.externalConversationId ?? null,
+      externalConversationId: linkage.externalConversationId,
     },
     order: {
       id: `fixture-order-${providerFixture.service.sourceServicePinId}`,
