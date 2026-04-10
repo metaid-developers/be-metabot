@@ -179,7 +179,11 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
       '<tr>'
       + '<td><strong>' + escapeHtml(entry.serviceName) + '</strong>' + (entry.requiresManualRefund ? '<div class="flag-text">Manual refund pending</div>' : '') + '</td>'
       + '<td>' + escapeHtml(entry.buyerLabel) + '</td>'
-      + '<td>' + escapeHtml(entry.stateLabel) + '</td>'
+      + '<td><strong>' + escapeHtml(entry.stateLabel) + '</strong>'
+        + (entry.statusDetail ? '<div class="flag-text">' + escapeHtml(entry.statusDetail) + '</div>' : '')
+        + (entry.ratingCommentPreview ? '<div class="flag-text">' + escapeHtml(entry.ratingCommentPreview) + '</div>' : '')
+        + (entry.ratingPinId ? '<div class="mono-text">' + escapeHtml(entry.ratingPinId) + '</div>' : '')
+        + '</td>'
       + '<td><a href="' + escapeHtml(entry.traceHref) + '">' + escapeHtml(entry.traceLabel) + '</a></td>'
       + '<td>' + escapeHtml(entry.createdAt) + '</td>'
       + '</tr>'

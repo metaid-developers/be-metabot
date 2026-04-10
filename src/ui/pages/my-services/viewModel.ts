@@ -25,10 +25,13 @@ export interface ProviderRecentOrderEntry {
   serviceName: string;
   buyerLabel: string;
   stateLabel: string;
+  statusDetail: string;
   traceHref: string;
   traceLabel: string;
   createdAt: string;
   requiresManualRefund: boolean;
+  ratingCommentPreview: string;
+  ratingPinId: string;
 }
 
 export interface ProviderManualActionEntry {
@@ -67,6 +70,22 @@ function pushRow(rows: ProviderConsoleRow[], label: string, value: unknown): voi
     return;
   }
   rows.push({ label, value: normalized });
+}
+
+function formatRatingStateLabel(record: Record<string, unknown>): string {
+  const ratingStatus = normalizeText(record.ratingStatus);
+  const ratingValue = normalizeText(record.ratingValue);
+
+  if (ratingStatus === 'rated_on_chain_followup_unconfirmed') {
+    return ratingValue ? `已评价 · ${ratingValue}/5 · 回传未确认` : '已评价 · 回传未确认';
+  }
+  if (ratingStatus === 'rated_on_chain') {
+    return ratingValue ? `已评价 · ${ratingValue}/5` : '已评价';
+  }
+  if (ratingStatus === 'sync_error') {
+    return '评分同步异常';
+  }
+  return '未评价';
 }
 
 export function buildMyServicesPageViewModel(input: {
@@ -118,11 +137,14 @@ export function buildMyServicesPageViewModel(input: {
           key: orderId || traceId,
           serviceName: normalizeText(record.serviceName) || 'Unknown service',
           buyerLabel: [buyerName, buyerGlobalMetaId].filter(Boolean).join(' · ') || 'Unknown buyer',
-          stateLabel: normalizeText(record.publicStatus) || 'unknown',
+          stateLabel: formatRatingStateLabel(record),
+          statusDetail: normalizeText(record.publicStatus) || 'unknown',
           traceHref: traceId ? `/ui/trace?traceId=${encodeURIComponent(traceId)}` : '/ui/trace',
           traceLabel: traceId || 'Trace unavailable',
           createdAt: normalizeText(record.createdAt) || 'Unknown',
           requiresManualRefund: manualActionKeys.has(orderId),
+          ratingCommentPreview: normalizeText(record.ratingComment),
+          ratingPinId: normalizeText(record.ratingPinId),
         } satisfies ProviderRecentOrderEntry;
       })
       .filter((entry) => Boolean(entry.key))
