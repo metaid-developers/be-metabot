@@ -92,8 +92,17 @@ test('buildTraceInspectorViewModel surfaces remote result and rating follow-up e
       resultText: 'Tomorrow will be bright with a light wind.',
       resultObservedAt: 1775000000000,
       resultDeliveryPinId: 'delivery-pin-1',
+      ratingRequested: true,
       ratingRequestText: '如果方便请给我一个评价吧。',
       ratingRequestedAt: 1775000005000,
+      ratingPublished: true,
+      ratingPinId: '/protocols/skill-service-rate-pin-7',
+      ratingValue: 5,
+      ratingComment: '评分：5分。结果清晰，感谢。',
+      ratingMessageSent: true,
+      ratingMessagePinId: '/protocols/simplemsg-pin-8',
+      ratingMessageError: null,
+      tStageCompleted: true,
       order: {
         paymentTxid: 'payment-tx-1',
         paymentAmount: '0.00001',
@@ -108,13 +117,13 @@ test('buildTraceInspectorViewModel surfaces remote result and rating follow-up e
           timestamp: 1775000007000,
           type: 'rating',
           sender: 'caller',
-          content: '评分：5分。结果清晰，感谢。',
+          content: '旧的 transcript 文案，不应覆盖结构化评分。',
           metadata: {
-            rate: '5',
-            ratingPinId: '/protocols/skill-service-rate-pin-7',
-            ratingMessageSent: true,
-            ratingMessagePinId: '/protocols/simplemsg-pin-8',
-            ratingMessageError: null,
+            rate: '1',
+            ratingPinId: '/protocols/skill-service-rate-pin-old',
+            ratingMessageSent: false,
+            ratingMessagePinId: '/protocols/simplemsg-pin-old',
+            ratingMessageError: 'old error',
           },
         },
       ],
@@ -135,15 +144,47 @@ test('buildTraceInspectorViewModel surfaces remote result and rating follow-up e
   );
 
   assert.equal(model.ratingPanel.status, 'sent');
+  assert.match(model.ratingPanel.summary, /T-stage is complete/i);
   assert.equal(model.ratingPanel.requestText, '如果方便请给我一个评价吧。');
   assert.equal(model.ratingPanel.commentText, '评分：5分。结果清晰，感谢。');
   assert.deepEqual(
     model.ratingPanel.metaRows,
     [
+      { label: 'T-Stage', value: 'Complete' },
       { label: 'Requested At', value: '1775000005000' },
       { label: 'Rating', value: '5' },
       { label: 'Rating Pin', value: '/protocols/skill-service-rate-pin-7' },
       { label: 'Provider Message', value: '/protocols/simplemsg-pin-8' },
     ],
   );
+});
+
+test('buildTraceInspectorViewModel treats on-chain rating plus follow-up delivery failure as successful closure', () => {
+  const model = buildTraceInspectorViewModel({
+    trace: {
+      traceId: 'trace-weather-456',
+      ratingRequested: true,
+      ratingRequestText: '请给我一个评价吧。',
+      ratingRequestedAt: 1775000009000,
+      ratingPublished: true,
+      ratingPinId: '/protocols/skill-service-rate-pin-9',
+      ratingValue: 4,
+      ratingComment: '解释完整。',
+      ratingMessageSent: false,
+      ratingMessagePinId: null,
+      ratingMessageError: 'Provider follow-up delivery was not confirmed.',
+      tStageCompleted: true,
+    },
+  });
+
+  assert.equal(model.ratingPanel.status, 'publish_only');
+  assert.match(model.ratingPanel.summary, /T-stage is complete/i);
+  assert.equal(model.ratingPanel.commentText, '解释完整。');
+  assert.deepEqual(model.ratingPanel.metaRows, [
+    { label: 'T-Stage', value: 'Complete' },
+    { label: 'Requested At', value: '1775000009000' },
+    { label: 'Rating', value: '4' },
+    { label: 'Rating Pin', value: '/protocols/skill-service-rate-pin-9' },
+    { label: 'Provider Delivery Error', value: 'Provider follow-up delivery was not confirmed.' },
+  ]);
 });

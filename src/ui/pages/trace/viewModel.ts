@@ -162,12 +162,18 @@ export function buildTraceInspectorViewModel(input: {
   let derivedResultText = normalizeText(trace.resultText);
   let derivedResultObservedAt = normalizeTimestamp(trace.resultObservedAt);
   let derivedResultDeliveryPinId = normalizeText(trace.resultDeliveryPinId);
-  let ratingCommentText = '';
-  let ratingRate = '';
-  let ratingPinId = '';
-  let ratingMessagePinId = '';
-  let ratingMessageError = '';
-  let ratingMessageSent: boolean | null = null;
+  let ratingCommentText = normalizeText(trace.ratingComment);
+  let ratingRate = typeof trace.ratingValue === 'number' && Number.isFinite(trace.ratingValue)
+    ? String(trace.ratingValue)
+    : normalizeText(trace.ratingValue);
+  let ratingPinId = normalizeText(trace.ratingPinId);
+  let ratingMessagePinId = normalizeText(trace.ratingMessagePinId);
+  let ratingMessageError = normalizeText(trace.ratingMessageError);
+  let ratingMessageSent: boolean | null = typeof trace.ratingMessageSent === 'boolean'
+    ? trace.ratingMessageSent
+    : null;
+  const ratingRequested = trace.ratingRequested === true || Boolean(normalizeText(trace.ratingRequestText));
+  let ratingPublished = trace.ratingPublished === true || Boolean(ratingPinId || ratingCommentText);
 
   for (let index = transcriptItemsRaw.length - 1; index >= 0; index -= 1) {
     const item = transcriptItemsRaw[index];
@@ -195,6 +201,12 @@ export function buildTraceInspectorViewModel(input: {
         ratingMessageSent = metadata.ratingMessageSent;
       }
     }
+    if (!ratingPublished && (type === 'rating' || metadataEvent === 'service_rating_published')) {
+      ratingPublished = Boolean(
+        content
+        || normalizeText(metadata.ratingPinId)
+      );
+    }
   }
 
   const resultMetaRows: TraceInspectorDefinitionRow[] = [];
@@ -211,7 +223,11 @@ export function buildTraceInspectorViewModel(input: {
 
   const ratingRequestText = normalizeText(trace.ratingRequestText);
   const ratingRequestedAt = normalizeTimestamp(trace.ratingRequestedAt);
+  const tStageCompleted = trace.tStageCompleted === true || ratingPublished;
   const ratingMetaRows: TraceInspectorDefinitionRow[] = [];
+  if (tStageCompleted) {
+    pushRow(ratingMetaRows, 'T-Stage', 'Complete');
+  }
   pushRow(ratingMetaRows, 'Requested At', ratingRequestedAt);
   pushRow(ratingMetaRows, 'Rating', ratingRate);
   pushRow(ratingMetaRows, 'Rating Pin', ratingPinId);
@@ -221,21 +237,17 @@ export function buildTraceInspectorViewModel(input: {
     pushRow(ratingMetaRows, 'Provider Delivery Error', ratingMessageError);
   }
 
-  const ratingStatus: TraceInspectorRatingPanel['status'] = ratingMessageSent
+  const ratingStatus: TraceInspectorRatingPanel['status'] = tStageCompleted && ratingMessageSent
     ? 'sent'
-    : ratingMessageError
-      ? 'delivery_failed'
-      : ratingCommentText || ratingPinId
-        ? 'publish_only'
-        : ratingRequestText
+    : tStageCompleted
+      ? 'publish_only'
+      : ratingRequested || ratingRequestText
           ? 'requested'
           : 'not_requested';
   const ratingSummary = ratingStatus === 'sent'
-    ? 'Buyer-side rating was published and the provider follow-up message was delivered.'
-    : ratingStatus === 'delivery_failed'
-      ? 'Buyer-side rating was published, but provider follow-up delivery failed.'
-      : ratingStatus === 'publish_only'
-        ? 'Buyer-side rating evidence exists, but provider follow-up delivery was not confirmed.'
+    ? 'DACT T-stage is complete. Buyer-side rating was published and the provider follow-up message was delivered.'
+    : ratingStatus === 'publish_only'
+      ? 'DACT T-stage is complete. Buyer-side rating was published on-chain, but provider follow-up delivery was not confirmed.'
         : ratingStatus === 'requested'
           ? 'The remote MetaBot requested a DACT T-stage rating, but no buyer follow-up is stored yet.'
           : 'No rating follow-up is stored for this trace.';

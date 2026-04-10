@@ -1342,6 +1342,27 @@ test('services rate publishes one buyer-side skill-service-rate record from a co
   assert.match(rated.payload.data.ratingMessagePinId, /^\/protocols\/simplemsg-pin-/);
   assert.equal(rated.payload.data.ratingMessageError, null);
 
+  const trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', called.payload.data.traceId], {
+    METABOT_CHAIN_API_BASE_URL: chainApi.baseUrl,
+    METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY: '046671c57d5bb3352a6ea84a01f7edf8afd3c8c3d4d1a281fd1b20fdba14d05c367c69fea700da308cf96b1aedbcb113fca7c187147cfeba79fb11f3b085d893cf',
+    METABOT_TEST_FAKE_METAWEB_REPLY: JSON.stringify({
+      responseText: 'Tomorrow will be bright with a light wind.',
+      deliveryPinId: 'delivery-pin-rating-2',
+      ratingRequestText: '服务已完成，如果方便请给我一个评价吧。',
+    }),
+  });
+
+  assert.equal(trace.exitCode, 0);
+  assert.equal(trace.payload.ok, true);
+  assert.equal(trace.payload.data.ratingRequested, true);
+  assert.equal(trace.payload.data.ratingPublished, true);
+  assert.equal(trace.payload.data.ratingPinId, rated.payload.data.pinId);
+  assert.equal(trace.payload.data.ratingValue, 5);
+  assert.equal(trace.payload.data.ratingComment, '结果清晰，响应也可靠。');
+  assert.equal(trace.payload.data.ratingMessageSent, true);
+  assert.equal(trace.payload.data.ratingMessageError, null);
+  assert.equal(trace.payload.data.tStageCompleted, true);
+
   const transcriptMarkdown = await readFile(rated.payload.data.transcriptMarkdownPath, 'utf8');
   assert.match(transcriptMarkdown, /结果清晰，响应也可靠。/);
   assert.match(transcriptMarkdown, /我的评分已记录在链上/);

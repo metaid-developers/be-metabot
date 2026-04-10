@@ -163,7 +163,7 @@ function buildProviderSummaryPayload(input: {
   };
 }
 
-async function readProviderRatingSnapshot(input: {
+async function readRatingDetailSnapshot(input: {
   ratingDetailStateStore: ReturnType<typeof createRatingDetailStateStore>;
   chainApiBaseUrl?: string;
   now?: () => number;
@@ -677,10 +677,118 @@ function extractTraceRatingRequest(input: {
   };
 }
 
+function extractTraceRatingClosure(input: {
+  trace: ReturnType<typeof buildSessionTrace>;
+  transcriptItems: Array<{
+    timestamp: number;
+    sender: 'caller' | 'provider' | 'system';
+    type: string;
+    content: string;
+    metadata?: Record<string, unknown> | null;
+  }>;
+  ratingDetail?: {
+    pinId: string;
+    rate: number;
+    comment: string | null;
+    createdAt: number | null;
+  } | null;
+}): {
+  ratingRequested: boolean;
+  ratingPublished: boolean;
+  ratingPinId: string | null;
+  ratingValue: number | null;
+  ratingComment: string | null;
+  ratingCreatedAt: number | null;
+  ratingMessageSent: boolean | null;
+  ratingMessagePinId: string | null;
+  ratingMessageError: string | null;
+  tStageCompleted: boolean;
+} {
+  let ratingPublished = Boolean(input.ratingDetail);
+  let ratingPinId = normalizeText(input.ratingDetail?.pinId) || null;
+  let ratingValue = Number.isFinite(input.ratingDetail?.rate)
+    ? Number(input.ratingDetail?.rate)
+    : null;
+  let ratingComment = normalizeText(input.ratingDetail?.comment) || null;
+  let ratingCreatedAt = Number.isFinite(input.ratingDetail?.createdAt)
+    ? Number(input.ratingDetail?.createdAt)
+    : null;
+  let ratingMessageSent: boolean | null = null;
+  let ratingMessagePinId: string | null = null;
+  let ratingMessageError: string | null = null;
+
+  for (let index = input.transcriptItems.length - 1; index >= 0; index -= 1) {
+    const item = input.transcriptItems[index];
+    const metadata = item.metadata ?? null;
+    const metadataEvent = normalizeText(metadata?.event);
+    const type = normalizeText(item.type);
+    const content = normalizeText(item.content);
+    const metadataPinId = normalizeText(metadata?.ratingPinId) || null;
+    const metadataRate = Number.parseInt(normalizeText(metadata?.rate), 10);
+
+    if (!ratingPinId && metadataPinId) {
+      ratingPinId = metadataPinId;
+      ratingPublished = true;
+    }
+    if (ratingValue === null && Number.isFinite(metadataRate)) {
+      ratingValue = metadataRate;
+    }
+    if (!ratingComment && type === 'rating' && content) {
+      ratingComment = content;
+    }
+    if (!ratingCreatedAt && type === 'rating' && Number.isFinite(item.timestamp)) {
+      ratingCreatedAt = item.timestamp;
+    }
+
+    if (type === 'rating' || metadataEvent === 'service_rating_published') {
+      ratingPublished = ratingPublished || Boolean(metadataPinId || content);
+      if (typeof metadata?.ratingMessageSent === 'boolean' && ratingMessageSent === null) {
+        ratingMessageSent = metadata.ratingMessageSent;
+      }
+      if (!ratingMessagePinId) {
+        ratingMessagePinId = normalizeText(metadata?.ratingMessagePinId) || null;
+      }
+      if (!ratingMessageError) {
+        ratingMessageError = normalizeText(metadata?.ratingMessageError) || null;
+      }
+    }
+
+    if (metadataEvent === 'service_rating_message_sent') {
+      ratingPublished = true;
+      ratingMessageSent = true;
+      ratingMessagePinId = normalizeText(metadata?.ratingMessagePinId) || ratingMessagePinId;
+    }
+
+    if (metadataEvent === 'service_rating_message_failed') {
+      ratingPublished = true;
+      if (ratingMessageSent === null) {
+        ratingMessageSent = false;
+      }
+      ratingMessageError = normalizeText(metadata?.ratingMessageError) || content || ratingMessageError;
+    }
+  }
+
+  const ratingRequest = extractTraceRatingRequest({ transcriptItems: input.transcriptItems });
+  return {
+    ratingRequested: Boolean(ratingRequest.ratingRequestText),
+    ratingPublished,
+    ratingPinId,
+    ratingValue,
+    ratingComment,
+    ratingCreatedAt,
+    ratingMessageSent,
+    ratingMessagePinId,
+    ratingMessageError,
+    tStageCompleted: ratingPublished,
+  };
+}
+
 async function buildTraceInspectorPayload(input: {
   traceId: string;
   trace: ReturnType<typeof buildSessionTrace>;
   sessionStateStore: ReturnType<typeof createSessionStateStore>;
+  ratingDetailStateStore: ReturnType<typeof createRatingDetailStateStore>;
+  chainApiBaseUrl?: string;
 }) {
   const sessionState = await input.sessionStateStore.readState();
   const sessions = sessionState.sessions
@@ -698,11 +806,31 @@ async function buildTraceInspectorPayload(input: {
     .sort((left, right) => left.resolvedAt - right.resolvedAt);
   const result = extractTraceResult({ transcriptItems });
   const ratingRequest = extractTraceRatingRequest({ transcriptItems });
+  const ratingSnapshot = await readRatingDetailSnapshot({
+    ratingDetailStateStore: input.ratingDetailStateStore,
+    chainApiBaseUrl: input.chainApiBaseUrl,
+  });
+  const serviceId = normalizeText(input.trace.order?.serviceId);
+  const servicePaidTx = normalizeText(input.trace.order?.paymentTxid);
+  const ratingDetail = serviceId && servicePaidTx
+    ? ratingSnapshot.ratingDetails.find((entry) => (
+        normalizeText(entry.serviceId) === serviceId
+        && normalizeText(entry.servicePaidTx) === servicePaidTx
+      )) ?? null
+    : null;
+  const ratingClosure = extractTraceRatingClosure({
+    trace: input.trace,
+    transcriptItems,
+    ratingDetail,
+  });
 
   return {
     ...input.trace,
     ...result,
     ...ratingRequest,
+    ...ratingClosure,
+    ratingSyncState: ratingSnapshot.ratingSyncState,
+    ratingSyncError: ratingSnapshot.ratingSyncError,
     inspector: {
       session: sessions.at(-1) ?? null,
       sessions,
@@ -1342,7 +1470,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       getSummary: async () => {
         const state = await runtimeStateStore.readState();
         const presence = await providerPresenceStore.read();
-        const ratingSnapshot = await readProviderRatingSnapshot({
+        const ratingSnapshot = await readRatingDetailSnapshot({
           ratingDetailStateStore,
           chainApiBaseUrl: input.chainApiBaseUrl,
         });
@@ -2437,6 +2565,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
             traceId,
             trace,
             sessionStateStore,
+            ratingDetailStateStore,
+            chainApiBaseUrl: input.chainApiBaseUrl,
           })
         );
       },
