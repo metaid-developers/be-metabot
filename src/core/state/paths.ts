@@ -8,6 +8,7 @@ export interface MetabotPaths {
   runtimeStatePath: string;
   daemonStatePath: string;
   providerPresenceStatePath: string;
+  ratingDetailStatePath: string;
   secretsPath: string;
 }
 
@@ -28,6 +29,7 @@ export function resolveMetabotPaths(homeDir: string): MetabotPaths {
     runtimeStatePath: path.join(hotRoot, 'runtime-state.json'),
     daemonStatePath: path.join(hotRoot, 'daemon.json'),
     providerPresenceStatePath: path.join(hotRoot, 'provider-presence.json'),
+    ratingDetailStatePath: path.join(hotRoot, 'rating-detail.json'),
     secretsPath: path.join(hotRoot, 'secrets.json')
   };
 }

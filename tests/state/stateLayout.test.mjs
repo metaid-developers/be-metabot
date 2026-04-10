@@ -14,6 +14,7 @@ test('resolveMetabotPaths splits hot state and exports under .metabot', () => {
     runtimeStatePath: '/tmp/home/.metabot/hot/runtime-state.json',
     daemonStatePath: '/tmp/home/.metabot/hot/daemon.json',
     providerPresenceStatePath: '/tmp/home/.metabot/hot/provider-presence.json',
+    ratingDetailStatePath: '/tmp/home/.metabot/hot/rating-detail.json',
     secretsPath: '/tmp/home/.metabot/hot/secrets.json'
   });
 });
