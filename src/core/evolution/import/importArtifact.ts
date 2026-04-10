@@ -90,7 +90,16 @@ export async function importPublishedEvolutionArtifact(input: {
   metadataPath: string;
   importedAt: number;
 }> {
-  const metadataPin = await input.readMetadataPinById(input.pinId);
+  let metadataPin: unknown | null;
+  try {
+    metadataPin = await input.readMetadataPinById(input.pinId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw createImportError(
+      'evolution_import_metadata_invalid',
+      `Failed to read metadata pin "${input.pinId}": ${message}`
+    );
+  }
   if (metadataPin == null) {
     throw createImportError(
       'evolution_import_pin_not_found',

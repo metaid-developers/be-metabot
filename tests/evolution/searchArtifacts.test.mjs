@@ -334,7 +334,7 @@ test('search surfaces transport/page envelope failures as search-level errors', 
         throw new Error('chain_path_list_failed');
       },
     }),
-    /chain_path_list_failed/
+    /evolution_chain_query_failed:chain_path_list_failed/
   );
 });
 
@@ -356,7 +356,7 @@ test('search surfaces invalid non-array page payload as wrapped search-level err
       remoteStore,
       fetchMetadataRows: async () => ({ data: { list: [] } }),
     }),
-    /evolution_search_fetch_failed:invalid_page_payload/
+    /evolution_search_result_invalid:invalid_page_payload/
   );
 });
 

@@ -453,6 +453,198 @@ test('evolution search/import read published artifact metadata + body via chain 
   assert.equal(metadataSaved.variantId, 'variant-remote-1');
 });
 
+test('evolution search returns a search-level command failure when chain metadata fetch fails', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    if (url.pathname === '/pin/path/list') {
+      res.writeHead(500, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'boom' }));
+      return;
+    }
+    res.writeHead(404, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'not_found' }));
+  });
+
+  await new Promise((resolve, reject) => {
+    server.listen(0, '127.0.0.1', (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    throw new Error('Expected TCP fake chain server');
+  }
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  t.after(async () => {
+    await new Promise((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  });
+
+  const searched = await runCommand(
+    homeDir,
+    ['evolution', 'search', '--skill', 'metabot-network-directory'],
+    {
+      METABOT_CHAIN_API_BASE_URL: baseUrl,
+      METABOT_TEST_FAKE_CHAIN_WRITE: '',
+      METABOT_TEST_FAKE_SUBSIDY: '',
+    }
+  );
+
+  assert.equal(searched.exitCode, 1);
+  assert.equal(searched.payload.ok, false);
+  assert.equal(searched.payload.code, 'evolution_chain_query_failed');
+  assert.match(searched.payload.message, /evolution_chain_query_failed:chain_evolution_http_500/);
+});
+
+test('evolution search rejects unsupported skills in this round', async () => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+
+  const searched = await runCommand(
+    homeDir,
+    ['evolution', 'search', '--skill', 'metabot-trace-inspector'],
+    {
+      METABOT_TEST_FAKE_CHAIN_WRITE: '',
+      METABOT_TEST_FAKE_SUBSIDY: '',
+    }
+  );
+
+  assert.equal(searched.exitCode, 1);
+  assert.equal(searched.payload.ok, false);
+  assert.equal(searched.payload.code, 'evolution_search_not_supported');
+  assert.match(
+    searched.payload.message,
+    /Evolution search is currently supported only for "metabot-network-directory"\./
+  );
+});
+
+test('evolution search returns a stable invalid-result error when chain search payload is malformed', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    if (url.pathname === '/pin/path/list') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ data: { rows: [] } }));
+      return;
+    }
+    res.writeHead(404, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'not_found' }));
+  });
+
+  await new Promise((resolve, reject) => {
+    server.listen(0, '127.0.0.1', (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    throw new Error('Expected TCP fake chain server');
+  }
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  t.after(async () => {
+    await new Promise((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  });
+
+  const searched = await runCommand(
+    homeDir,
+    ['evolution', 'search', '--skill', 'metabot-network-directory'],
+    {
+      METABOT_CHAIN_API_BASE_URL: baseUrl,
+      METABOT_TEST_FAKE_CHAIN_WRITE: '',
+      METABOT_TEST_FAKE_SUBSIDY: '',
+    }
+  );
+
+  assert.equal(searched.exitCode, 1);
+  assert.equal(searched.payload.ok, false);
+  assert.equal(searched.payload.code, 'evolution_search_result_invalid');
+  assert.match(searched.payload.message, /evolution_search_result_invalid:invalid_page_payload/);
+});
+
+test('evolution import returns a stable import error when metadata pin lookup fails in transport', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    if (url.pathname === '/pin/evolution-metadata-pin-transport-error') {
+      res.writeHead(500, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'boom' }));
+      return;
+    }
+    res.writeHead(404, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'not_found' }));
+  });
+
+  await new Promise((resolve, reject) => {
+    server.listen(0, '127.0.0.1', (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    throw new Error('Expected TCP fake chain server');
+  }
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  t.after(async () => {
+    await new Promise((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  });
+
+  const imported = await runCommand(
+    homeDir,
+    ['evolution', 'import', '--pin-id', 'evolution-metadata-pin-transport-error'],
+    {
+      METABOT_CHAIN_API_BASE_URL: baseUrl,
+      METABOT_TEST_FAKE_CHAIN_WRITE: '',
+      METABOT_TEST_FAKE_SUBSIDY: '',
+    }
+  );
+
+  assert.equal(imported.exitCode, 1);
+  assert.equal(imported.payload.ok, false);
+  assert.equal(imported.payload.code, 'evolution_import_metadata_invalid');
+  assert.match(
+    imported.payload.message,
+    /Failed to read metadata pin "evolution-metadata-pin-transport-error": chain_evolution_http_500/
+  );
+});
+
 test('network services merges remote demo directory seeds and returns provider daemon base urls for agent-side invocation', async (t) => {
   const callerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-caller-'));
   const providerHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-provider-'));

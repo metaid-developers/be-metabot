@@ -43,6 +43,13 @@ function createMissingScopeHashError(): Error {
   return new Error('evolution_scope_hash_missing');
 }
 
+function createSearchError(
+  code: 'evolution_chain_query_failed' | 'evolution_search_result_invalid' | 'evolution_search_index_failed',
+  detail: string
+): Error {
+  return new Error(`${code}:${detail}`);
+}
+
 export function deriveResolvedScopeHash(resolved: {
   scopeMetadata?: {
     scopeHash?: string | null;
@@ -82,12 +89,15 @@ export async function searchPublishedEvolutionArtifacts(input: {
   try {
     const fetchedRows = await input.fetchMetadataRows();
     if (!Array.isArray(fetchedRows)) {
-      throw new Error('invalid_page_payload');
+      throw createSearchError('evolution_search_result_invalid', 'invalid_page_payload');
     }
     rawRows = fetchedRows.slice(0, EVOLUTION_SEARCH_MAX_RAW_ROWS);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`evolution_search_fetch_failed:${message}`);
+    if (message.startsWith('evolution_search_result_invalid:')) {
+      throw new Error(message);
+    }
+    throw createSearchError('evolution_chain_query_failed', message);
   }
 
   let remoteIndex: Awaited<ReturnType<typeof input.remoteStore.readIndex>>;
@@ -95,7 +105,7 @@ export async function searchPublishedEvolutionArtifacts(input: {
     remoteIndex = await input.remoteStore.readIndex();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`evolution_search_index_failed:${message}`);
+    throw createSearchError('evolution_search_index_failed', message);
   }
   const dedupedByVariantId = new Map<string, PublishedEvolutionArtifactSearchResult>();
 

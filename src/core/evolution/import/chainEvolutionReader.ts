@@ -1,8 +1,7 @@
+import { EVOLUTION_ARTIFACT_PROTOCOL_PATH } from '../protocol';
 import { EVOLUTION_SEARCH_MAX_RAW_ROWS, parseMetafilePinId } from './publishedArtifactProtocol';
 
 const DEFAULT_CHAIN_API_BASE_URL = 'https://manapi.metaid.io';
-const EVOLUTION_ARTIFACT_PROTOCOL_PATH = '/protocols/metabot-evolution-artifact-v1';
-
 function normalizeBaseUrl(value: string | undefined): string {
   const normalized = typeof value === 'string' ? value.trim() : '';
   return (normalized || DEFAULT_CHAIN_API_BASE_URL).replace(/\/$/, '');
@@ -35,11 +34,11 @@ function parseContentSummary(value: unknown): Record<string, unknown> | null {
 
 function extractListRows(payload: unknown): Record<string, unknown>[] {
   if (!isRecord(payload) || !isRecord(payload.data)) {
-    return [];
+    throw new Error('invalid_page_payload');
   }
   const { list } = payload.data;
   if (!Array.isArray(list)) {
-    return [];
+    throw new Error('invalid_page_payload');
   }
   return list.filter((entry): entry is Record<string, unknown> => isRecord(entry));
 }
@@ -80,6 +79,10 @@ function normalizePinId(pinId: string): string {
   return pinId.trim();
 }
 
+function createInvalidSearchResultError(detail: string): Error {
+  return new Error(`evolution_search_result_invalid:${detail}`);
+}
+
 export function createChainEvolutionReader(input: {
   chainApiBaseUrl?: string;
   fetchImpl?: typeof fetch;
@@ -101,8 +104,20 @@ export function createChainEvolutionReader(input: {
       if (!response.ok) {
         throw new Error(`chain_evolution_http_${response.status}`);
       }
-      const payload = await response.json() as unknown;
-      const rows = extractListRows(payload);
+      let payload: unknown;
+      try {
+        payload = await response.json() as unknown;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw createInvalidSearchResultError(message || 'invalid_page_payload');
+      }
+      let rows: Record<string, unknown>[];
+      try {
+        rows = extractListRows(payload);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw createInvalidSearchResultError(message || 'invalid_page_payload');
+      }
 
       return rows
         .map((item) => {
