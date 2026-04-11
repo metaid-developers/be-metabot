@@ -3,18 +3,49 @@ import { commandMissingFlag, commandUnknownSubcommand, readFlagValue } from './h
 import type { CliRuntimeContext } from '../types';
 
 export async function runIdentityCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
-  if (args[0] !== 'create') {
-    return commandUnknownSubcommand(`identity ${args.join(' ')}`.trim());
+  const subcommand = args[0];
+
+  if (subcommand === 'create') {
+    const name = readFlagValue(args, '--name');
+    if (!name) {
+      return commandMissingFlag('--name');
+    }
+
+    const handler = context.dependencies.identity?.create;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Identity create handler is not configured.');
+    }
+    return handler({ name });
   }
 
-  const name = readFlagValue(args, '--name');
-  if (!name) {
-    return commandMissingFlag('--name');
+  if (subcommand === 'who') {
+    const handler = context.dependencies.identity?.who;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Identity who handler is not configured.');
+    }
+    return handler();
   }
 
-  const handler = context.dependencies.identity?.create;
-  if (!handler) {
-    return commandFailed('not_implemented', 'Identity create handler is not configured.');
+  if (subcommand === 'list') {
+    const handler = context.dependencies.identity?.list;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Identity list handler is not configured.');
+    }
+    return handler();
   }
-  return handler({ name });
+
+  if (subcommand === 'assign') {
+    const name = readFlagValue(args, '--name');
+    if (!name) {
+      return commandMissingFlag('--name');
+    }
+
+    const handler = context.dependencies.identity?.assign;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Identity assign handler is not configured.');
+    }
+    return handler({ name });
+  }
+
+  return commandUnknownSubcommand(`identity ${args.join(' ')}`.trim());
 }

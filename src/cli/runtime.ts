@@ -15,6 +15,13 @@ import { listImportedEvolutionArtifacts } from '../core/evolution/import/listImp
 import { deriveResolvedScopeHash, searchPublishedEvolutionArtifacts } from '../core/evolution/import/searchArtifacts';
 import { adoptRemoteEvolutionArtifact } from '../core/evolution/remoteAdoption';
 import { uploadLocalFileToChain } from '../core/files/uploadFile';
+import {
+  listIdentityProfiles,
+  readActiveMetabotHome,
+  readActiveMetabotHomeSync,
+  setActiveMetabotHome,
+  upsertIdentityProfile,
+} from '../core/identity/identityProfiles';
 import { renderResolvedSkillContract } from '../core/skills/skillResolver';
 import type { SkillHost, SkillRenderFormat, SkillVariantArtifact } from '../core/skills/skillContractTypes';
 import type { SkillActiveVariantRef } from '../core/evolution/types';
@@ -317,6 +324,12 @@ export function buildDaemonConfigHash(
 function normalizeHomeDir(env: NodeJS.ProcessEnv, cwd: string): string {
   const explicit = typeof env.METABOT_HOME === 'string' ? env.METABOT_HOME.trim() : '';
   if (explicit) return explicit;
+  const systemHomeDir = normalizeSystemHomeDir(env, cwd);
+  const activeHomeDir = readActiveMetabotHomeSync(systemHomeDir);
+  return activeHomeDir || systemHomeDir;
+}
+
+function normalizeSystemHomeDir(env: NodeJS.ProcessEnv, cwd: string): string {
   const home = typeof env.HOME === 'string' ? env.HOME.trim() : '';
   return home || cwd;
 }
@@ -435,6 +448,7 @@ async function startDetachedDaemon(
   preferredRecord?: RuntimeDaemonRecord | null,
 ): Promise<string> {
   const homeDir = normalizeHomeDir(context.env, context.cwd);
+  const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
   const store = createRuntimeStateStore(homeDir);
   const expectedConfigHash = buildDaemonConfigHash(context.env);
   const persistedRecord = await store.readDaemon();
@@ -456,7 +470,7 @@ async function startDetachedDaemon(
       stdio: 'ignore',
       env: {
         ...context.env,
-        HOME: homeDir,
+        HOME: systemHomeDir,
         METABOT_HOME: homeDir,
         [DAEMON_PREFERRED_PORT_ENV]: String(
           parseDaemonPort(context.env[DAEMON_PREFERRED_PORT_ENV])
@@ -923,6 +937,106 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     },
     identity: {
       create: async (input) => requestJson(context, 'POST', '/api/identity/create', input),
+      who: async () => {
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+        const runtimeStateStore = createRuntimeStateStore(homeDir);
+        const state = await runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed(
+            'identity_missing',
+            'No local MetaBot identity is loaded for the current active home.'
+          );
+        }
+
+        await upsertIdentityProfile({
+          systemHomeDir,
+          name: state.identity.name,
+          homeDir,
+          globalMetaId: state.identity.globalMetaId,
+          mvcAddress: state.identity.mvcAddress,
+        });
+        await setActiveMetabotHome({
+          systemHomeDir,
+          homeDir,
+        });
+
+        return commandSuccess({
+          activeHomeDir: homeDir,
+          systemHomeDir,
+          identity: state.identity,
+        });
+      },
+      list: async () => {
+        const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+        const homeDir = normalizeHomeDir(context.env, context.cwd);
+        const runtimeStateStore = createRuntimeStateStore(homeDir);
+        const state = await runtimeStateStore.readState();
+        if (state.identity) {
+          await upsertIdentityProfile({
+            systemHomeDir,
+            name: state.identity.name,
+            homeDir,
+            globalMetaId: state.identity.globalMetaId,
+            mvcAddress: state.identity.mvcAddress,
+          });
+          await setActiveMetabotHome({
+            systemHomeDir,
+            homeDir,
+          });
+        }
+
+        const profiles = await listIdentityProfiles(systemHomeDir);
+        const activeHomeDir = await readActiveMetabotHome(systemHomeDir);
+        return commandSuccess({
+          systemHomeDir,
+          activeHomeDir: activeHomeDir || null,
+          profiles,
+        });
+      },
+      assign: async (input) => {
+        const targetName = normalizeEnvText(input.name);
+        if (!targetName) {
+          return commandFailed('missing_name', 'MetaBot name is required for identity assign.');
+        }
+
+        const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+        const profiles = await listIdentityProfiles(systemHomeDir);
+        const normalizedTarget = targetName.toLowerCase();
+        const matched = profiles.filter((profile) => profile.name.toLowerCase() === normalizedTarget);
+
+        if (matched.length === 0) {
+          return commandFailed(
+            'identity_profile_not_found',
+            `No local MetaBot profile named "${targetName}" was found.`
+          );
+        }
+        if (matched.length > 1) {
+          return commandFailed(
+            'identity_profile_ambiguous',
+            `Multiple local MetaBot profiles named "${targetName}" were found. Rename one profile before assigning.`
+          );
+        }
+
+        const selected = matched[0];
+        const selectedState = await createRuntimeStateStore(selected.homeDir).readState();
+        if (!selectedState.identity) {
+          return commandFailed(
+            'identity_profile_invalid',
+            `The selected profile "${selected.name}" has no local identity state in ${selected.homeDir}.`
+          );
+        }
+
+        await setActiveMetabotHome({
+          systemHomeDir,
+          homeDir: selected.homeDir,
+        });
+
+        return commandSuccess({
+          activeHomeDir: selected.homeDir,
+          assignedProfile: selected,
+        });
+      },
     },
     network: {
       listServices: async (input) => {
@@ -1288,6 +1402,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     homeDirOrPaths: paths,
     handlers: createDefaultMetabotDaemonHandlers({
       homeDir,
+      systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
       getDaemonRecord: () => daemonRecord,
       secretStore,
       signer,

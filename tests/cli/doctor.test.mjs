@@ -15,6 +15,9 @@ function createHarness() {
     daemon: [],
     doctor: [],
     identity: [],
+    identityWho: [],
+    identityList: [],
+    identityAssign: [],
     trace: [],
     ui: [],
   };
@@ -54,6 +57,40 @@ function createHarness() {
             return commandSuccess({
               name: input.name,
               globalMetaId: 'gm-alice',
+            });
+          },
+          who: async () => {
+            calls.identityWho.push({ command: 'who' });
+            return commandSuccess({
+              activeHomeDir: '/tmp/home-a',
+              identity: {
+                name: 'Alice',
+                globalMetaId: 'gm-alice',
+              },
+            });
+          },
+          list: async () => {
+            calls.identityList.push({ command: 'list' });
+            return commandSuccess({
+              activeHomeDir: '/tmp/home-a',
+              profiles: [
+                {
+                  name: 'Alice',
+                  homeDir: '/tmp/home-a',
+                  globalMetaId: 'gm-alice',
+                },
+              ],
+            });
+          },
+          assign: async (input) => {
+            calls.identityAssign.push(input);
+            return commandSuccess({
+              activeHomeDir: '/tmp/home-b',
+              assignedProfile: {
+                name: input.name,
+                homeDir: '/tmp/home-b',
+                globalMetaId: 'gm-bob',
+              },
             });
           },
         },
@@ -133,6 +170,67 @@ test('runCli dispatches `metabot identity create --name` with the provided MetaB
     data: {
       name: 'Alice',
       globalMetaId: 'gm-alice',
+    },
+  });
+});
+
+test('runCli dispatches `metabot identity who` and returns the active identity envelope', async () => {
+  const harness = createHarness();
+  const exitCode = await runCli(['identity', 'who'], harness.context);
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(harness.calls.identityWho, [{ command: 'who' }]);
+  assert.deepEqual(parseLastJson(harness.stdout), {
+    ok: true,
+    state: 'success',
+    data: {
+      activeHomeDir: '/tmp/home-a',
+      identity: {
+        name: 'Alice',
+        globalMetaId: 'gm-alice',
+      },
+    },
+  });
+});
+
+test('runCli dispatches `metabot identity list` and returns known local profiles', async () => {
+  const harness = createHarness();
+  const exitCode = await runCli(['identity', 'list'], harness.context);
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(harness.calls.identityList, [{ command: 'list' }]);
+  assert.deepEqual(parseLastJson(harness.stdout), {
+    ok: true,
+    state: 'success',
+    data: {
+      activeHomeDir: '/tmp/home-a',
+      profiles: [
+        {
+          name: 'Alice',
+          homeDir: '/tmp/home-a',
+          globalMetaId: 'gm-alice',
+        },
+      ],
+    },
+  });
+});
+
+test('runCli dispatches `metabot identity assign --name` and returns the assigned profile', async () => {
+  const harness = createHarness();
+  const exitCode = await runCli(['identity', 'assign', '--name', 'Bob'], harness.context);
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(harness.calls.identityAssign, [{ name: 'Bob' }]);
+  assert.deepEqual(parseLastJson(harness.stdout), {
+    ok: true,
+    state: 'success',
+    data: {
+      activeHomeDir: '/tmp/home-b',
+      assignedProfile: {
+        name: 'Bob',
+        homeDir: '/tmp/home-b',
+        globalMetaId: 'gm-bob',
+      },
     },
   });
 });

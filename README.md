@@ -219,6 +219,21 @@ Useful early signals:
 - subsidy state becomes claimed
 - required identity pins are synced or partially synced with clear follow-up semantics
 
+## Identity Profiles
+
+`be-metabot` now supports local identity profile introspection and switching:
+
+```bash
+metabot identity who
+metabot identity list
+metabot identity assign --name "Charles"
+```
+
+Important behavior:
+
+- `metabot identity create --name ...` is bound to the current active local home
+- if an identity already exists in the active home with a different name, create now fails with `identity_name_conflict` instead of silently reusing the old identity
+
 ## DACT Quick Path
 
 Read online services:

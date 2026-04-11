@@ -9,6 +9,10 @@ import {
 } from '../core/contracts/commandResult';
 import { createFileSecretStore } from '../core/secrets/fileSecretStore';
 import {
+  setActiveMetabotHome,
+  upsertIdentityProfile,
+} from '../core/identity/identityProfiles';
+import {
   createRuntimeStateStore,
   type RuntimeDaemonRecord,
   type RuntimeIdentityRecord,
@@ -1194,6 +1198,7 @@ async function applyCallerForegroundTimeout(input: {
 
 export function createDefaultMetabotDaemonHandlers(input: {
   homeDir: string;
+  systemHomeDir?: string;
   getDaemonRecord: () => RuntimeDaemonRecord | null;
   secretStore?: SecretStore;
   signer?: Signer;
@@ -1215,8 +1220,27 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const sessionEngine = createA2ASessionEngine();
   const resolvePeerChatPublicKey = input.fetchPeerChatPublicKey ?? fetchPeerChatPublicKey;
   const callerReplyWaiter = input.callerReplyWaiter ?? createSocketIoMetaWebReplyWaiter();
+  const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
   // Keep daemon-side follow-up consumers alive after foreground timeout so late deliveries still land in trace state.
   const pendingCallerReplyContinuations = new Map<string, Promise<void>>();
+
+  async function trackActiveIdentityProfile(identity: RuntimeIdentityRecord): Promise<void> {
+    try {
+      await upsertIdentityProfile({
+        systemHomeDir: normalizedSystemHomeDir,
+        name: identity.name,
+        homeDir: input.homeDir,
+        globalMetaId: identity.globalMetaId,
+        mvcAddress: identity.mvcAddress,
+      });
+      await setActiveMetabotHome({
+        systemHomeDir: normalizedSystemHomeDir,
+        homeDir: input.homeDir,
+      });
+    } catch {
+      // Profile indexing is best-effort and should not block core identity bootstrap.
+    }
+  }
 
   function scheduleCallerReplyContinuation(input: {
     trace: SessionTraceRecord;
@@ -1352,8 +1376,17 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
 
         const state = await runtimeStateStore.readState();
-        if (isIdentityBootstrapReady(state.identity)) {
-          return commandSuccess(state.identity);
+        const existingName = normalizeText(state.identity?.name);
+        if (state.identity && existingName && existingName !== normalizedName) {
+          return commandFailed(
+            'identity_name_conflict',
+            `Current active local identity is "${existingName}". Switch profile first or choose the same name.`
+          );
+        }
+        const existingIdentity = state.identity;
+        if (existingIdentity && isIdentityBootstrapReady(existingIdentity)) {
+          await trackActiveIdentityProfile(existingIdentity);
+          return commandSuccess(existingIdentity);
         }
 
         const requestName = state.identity?.name || normalizedName;
@@ -1378,6 +1411,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         const nextState = await runtimeStateStore.readState();
         if (nextState.identity && (bootstrap.success || bootstrap.canSkip)) {
+          await trackActiveIdentityProfile(nextState.identity);
           return commandSuccess(nextState.identity);
         }
 

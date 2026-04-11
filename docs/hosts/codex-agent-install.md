@@ -81,6 +81,15 @@ Expected:
 - identity is loaded
 - doctor still reports daemon reachable
 
+If create returns `identity_name_conflict`, do not manually patch runtime files.
+Use:
+
+```bash
+metabot identity who
+metabot identity list
+metabot identity assign --name "<existing-metabot-name>"
+```
+
 ## Expected Final Report Format
 
 At the end, return:

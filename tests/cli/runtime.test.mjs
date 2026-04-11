@@ -58,6 +58,32 @@ async function runCommand(homeDir, args, envOverrides = {}) {
   };
 }
 
+async function runCommandWithEnv(cwd, args, envOverrides = {}) {
+  const stdout = [];
+  const stderr = [];
+  const env = {
+    ...process.env,
+    METABOT_TEST_FAKE_CHAIN_WRITE: '1',
+    METABOT_TEST_FAKE_SUBSIDY: '1',
+    METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
+    ...envOverrides,
+  };
+
+  const exitCode = await runCli(args, {
+    env,
+    cwd,
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: (chunk) => { stderr.push(String(chunk)); return true; } },
+  });
+
+  return {
+    exitCode,
+    stdout,
+    stderr,
+    payload: parseLastJson(stdout),
+  };
+}
+
 async function runCommandText(homeDir, args, envOverrides = {}) {
   const stdout = [];
   const stderr = [];
@@ -443,6 +469,76 @@ test('identity create autostarts the local daemon and doctor reports the identit
   const daemonState = JSON.parse(await readFile(path.join(homeDir, '.metabot', 'hot', 'daemon.json'), 'utf8'));
   assert.match(daemonState.baseUrl, /^http:\/\/127\.0\.0\.1:\d+$/);
   assert.equal(Number.isInteger(daemonState.pid), true);
+});
+
+test('identity create returns identity_name_conflict when an active identity with a different name already exists', async (t) => {
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-'));
+  t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Bob']);
+  assert.equal(created.exitCode, 0);
+  assert.equal(created.payload.ok, true);
+  assert.equal(created.payload.data.name, 'Bob');
+
+  const conflict = await runCommand(homeDir, ['identity', 'create', '--name', 'Charles']);
+  assert.equal(conflict.exitCode, 1);
+  assert.equal(conflict.payload.ok, false);
+  assert.equal(conflict.payload.code, 'identity_name_conflict');
+
+  const state = JSON.parse(
+    await readFile(path.join(homeDir, '.metabot', 'hot', 'runtime-state.json'), 'utf8')
+  );
+  assert.equal(state.identity.name, 'Bob');
+});
+
+test('identity list/assign/who supports switching active local bot home across registered profiles', async (t) => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const bobHome = path.join(systemHome, 'profiles', 'bob-home');
+  const charlesHome = path.join(systemHome, 'profiles', 'charles-home');
+  await mkdir(bobHome, { recursive: true });
+  await mkdir(charlesHome, { recursive: true });
+
+  t.after(async () => stopDaemon(bobHome));
+  t.after(async () => stopDaemon(charlesHome));
+
+  const commonEnv = {
+    HOME: systemHome,
+  };
+
+  const createdBob = await runCommandWithEnv(systemHome, ['identity', 'create', '--name', 'Bob'], {
+    ...commonEnv,
+    METABOT_HOME: bobHome,
+  });
+  assert.equal(createdBob.exitCode, 0);
+  assert.equal(createdBob.payload.ok, true);
+  assert.equal(createdBob.payload.data.name, 'Bob');
+
+  const createdCharles = await runCommandWithEnv(systemHome, ['identity', 'create', '--name', 'Charles'], {
+    ...commonEnv,
+    METABOT_HOME: charlesHome,
+  });
+  assert.equal(createdCharles.exitCode, 0);
+  assert.equal(createdCharles.payload.ok, true);
+  assert.equal(createdCharles.payload.data.name, 'Charles');
+
+  const listed = await runCommandWithEnv(systemHome, ['identity', 'list'], commonEnv);
+  assert.equal(listed.exitCode, 0);
+  assert.equal(listed.payload.ok, true);
+  assert.equal(Array.isArray(listed.payload.data.profiles), true);
+  assert.equal(listed.payload.data.profiles.some((profile) => profile.name === 'Bob'), true);
+  assert.equal(listed.payload.data.profiles.some((profile) => profile.name === 'Charles'), true);
+  assert.equal(listed.payload.data.activeHomeDir, charlesHome);
+
+  const assignedBob = await runCommandWithEnv(systemHome, ['identity', 'assign', '--name', 'Bob'], commonEnv);
+  assert.equal(assignedBob.exitCode, 0);
+  assert.equal(assignedBob.payload.ok, true);
+  assert.equal(assignedBob.payload.data.activeHomeDir, bobHome);
+
+  const who = await runCommandWithEnv(systemHome, ['identity', 'who'], commonEnv);
+  assert.equal(who.exitCode, 0);
+  assert.equal(who.payload.ok, true);
+  assert.equal(who.payload.data.identity.name, 'Bob');
+  assert.equal(who.payload.data.activeHomeDir, bobHome);
 });
 
 test('daemon config restarts keep the previous port so local inspector URLs stay stable', async (t) => {

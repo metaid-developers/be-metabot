@@ -188,16 +188,19 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   ROOT_COMMAND_HELP,
   {
     commandPath: ['identity'],
-    summary: 'Identity commands for creating the first local MetaBot.',
+    summary: 'Identity commands for creating, listing, and switching local MetaBot profiles.',
     usage: 'metabot identity <subcommand>',
     subcommands: [
       { name: 'create', summary: 'Create a local MetaBot from a human-provided name.' },
+      { name: 'who', summary: 'Show which local MetaBot is currently active.' },
+      { name: 'list', summary: 'List local MetaBot profiles discovered on this machine.' },
+      { name: 'assign', summary: 'Switch the active local MetaBot profile by name.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },
   {
     commandPath: ['identity', 'create'],
-    summary: 'Create the first local MetaBot and complete the validated bootstrap flow.',
+    summary: 'Create one local MetaBot and complete the validated bootstrap flow for the current active home.',
     usage: 'metabot identity create --name <display-name>',
     requiredFlags: [
       { flag: '--name', value: '<display-name>', description: 'Human-facing name for the new local MetaBot.' },
@@ -211,10 +214,59 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'globalMetaId',
     ],
     failureSemantics: [
+      'Fails with identity_name_conflict when another active local identity already exists under the current home.',
       'Fails when the bootstrap flow cannot derive keys, claim subsidy, or persist identity state.',
     ],
     examples: [
       'metabot identity create --name "Alice"',
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['identity', 'who'],
+    summary: 'Show the currently active local MetaBot identity and active home directory.',
+    usage: 'metabot identity who',
+    successFields: [
+      'activeHomeDir',
+      'systemHomeDir',
+      'identity.name',
+      'identity.globalMetaId',
+      'identity.mvcAddress',
+    ],
+    failureSemantics: [
+      'Fails when no local identity is initialized for the current active home.',
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['identity', 'list'],
+    summary: 'List local MetaBot profiles on this machine and report the current active home.',
+    usage: 'metabot identity list',
+    successFields: [
+      'systemHomeDir',
+      'activeHomeDir',
+      'profiles',
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['identity', 'assign'],
+    summary: 'Switch the active local MetaBot profile by display name.',
+    usage: 'metabot identity assign --name <display-name>',
+    requiredFlags: [
+      { flag: '--name', value: '<display-name>', description: 'Existing local MetaBot profile name to activate.' },
+    ],
+    successFields: [
+      'activeHomeDir',
+      'assignedProfile.name',
+      'assignedProfile.globalMetaId',
+    ],
+    failureSemantics: [
+      'Fails when no local profile matches the requested name.',
+      'Fails when multiple profiles share the same name and assignment is ambiguous.',
+    ],
+    examples: [
+      'metabot identity assign --name "Charles"',
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },

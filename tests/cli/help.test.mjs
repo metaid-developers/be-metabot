@@ -94,3 +94,22 @@ test('runCli prints nested group help for `metabot network sources --help`', asy
   assert.match(output, /^\s+add\s+/m);
   assert.match(output, /^\s+remove\s+/m);
 });
+
+test('runCli prints identity group help with create/who/list/assign subcommands', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['identity', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot identity <subcommand>/m);
+  assert.match(output, /^Commands:/m);
+  assert.match(output, /^\s+create\s+/m);
+  assert.match(output, /^\s+who\s+/m);
+  assert.match(output, /^\s+list\s+/m);
+  assert.match(output, /^\s+assign\s+/m);
+});
